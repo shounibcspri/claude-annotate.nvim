@@ -57,12 +57,20 @@ function M.open(pane)
   end
   if #lines == 0 then return vim.notify('claude-review: pane ' .. pane .. ' is empty', vim.log.levels.WARN) end
 
+  local baleia_ok, baleia = pcall(require, 'baleia')
+  if not baleia_ok then
+    -- colour is a nicety, the excerpts are the point: a missing optional dependency
+    -- should cost highlighting, not fill the buffer with literal escape codes
+    lines = vim.tbl_map(strip_sgr, lines)
+    vim.notify('claude-review: baleia.nvim not found, output will not be coloured', vim.log.levels.WARN)
+  end
+
   local buf = vim.api.nvim_create_buf(true, true)
   vim.api.nvim_buf_set_name(buf, 'claude-review://' .. pane)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   -- rewrites the lines without the escape codes and highlights them instead, so every
   -- later read of this buffer -- excerpts included -- sees plain text
-  require('baleia').setup({}).once(buf)
+  if baleia_ok then baleia.setup({}).once(buf) end
   vim.b[buf].claude_pane = pane
   excerpts[buf] = {}
 
