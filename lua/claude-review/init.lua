@@ -92,6 +92,10 @@ function M.open(pane)
     vim.tbl_extend('force', opts, { desc = 'Claude: co[m]ment selection' })
   )
   vim.keymap.set('n', '<leader>pp', M.submit, vim.tbl_extend('force', opts, { desc = 'Claude: [p]ush comments' }))
+  -- setting the lines marks the buffer modified, so plain `:q` refuses and leaving
+  -- without commenting meant typing `:qa!`. Recording a macro in a snapshot you are
+  -- about to throw away is not a thing anyone wants to do.
+  vim.keymap.set('n', 'q', '<Cmd>qa!<CR>', vim.tbl_extend('force', opts, { desc = 'Claude: [q]uit, discard comments' }))
 
   vim.api.nvim_win_set_buf(0, buf)
   vim.wo[0].linebreak = true -- -J lines are long; break them at spaces, not mid-word
