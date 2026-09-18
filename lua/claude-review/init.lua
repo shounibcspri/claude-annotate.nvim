@@ -158,13 +158,20 @@ function M.submit()
 
   local tmpfile = vim.fn.tempname()
   vim.fn.writefile(out, tmpfile)
-  tmux { 'load-buffer', '-b', TMUX_BUFFER, tmpfile }
-  -- -p wraps in bracketed paste so the newlines do not submit line by line
-  tmux { 'paste-buffer', '-b', TMUX_BUFFER, '-d', '-p', '-t', pane }
-  -- block rather than defer: we exit immediately after, and a deferred timer would
-  -- die with nvim, leaving the text pasted but never submitted
-  vim.wait(200)
-  tmux { 'send-keys', '-t', pane, 'Enter' }
+  local sent, err = pcall(function()
+    tmux { 'load-buffer', '-b', TMUX_BUFFER, tmpfile }
+    -- -p wraps in bracketed paste so the newlines do not submit line by line
+    tmux { 'paste-buffer', '-b', TMUX_BUFFER, '-d', '-p', '-t', pane }
+    -- block rather than defer: we exit immediately after, and a deferred timer would
+    -- die with nvim, leaving the text pasted but never submitted
+    vim.wait(200)
+    tmux { 'send-keys', '-t', pane, 'Enter' }
+  end)
+  -- the pane can be killed or given to another program while the popup is open; stay
+  -- open on failure so the comments are still there to copy out
+  if not sent then
+    return vim.notify('claude-review: could not reach pane ' .. pane .. ': ' .. tostring(err), vim.log.levels.ERROR)
+  end
 
   -- closes the popup, revealing the reply
   vim.cmd 'qa!'
