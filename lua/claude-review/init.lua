@@ -21,7 +21,15 @@ local function tmux(args)
   return res.stdout or ''
 end
 
-local function is_comment(line) return line:sub(1, #PREFIX) == PREFIX end
+-- Only the full `>> [n] text` shape counts as one of ours. A bare prefix test also
+-- claimed Claude's own output whenever it began with the prefix -- quoted text, a
+-- diff -- and such a line then dropped out of the excerpt with nothing said.
+local COMMENT_PATTERN = '^' .. PREFIX:gsub('%p', '%%%0') .. '%[(%d+)%]%s*(.*)$'
+
+---@return string? n, string? text
+local function parse_comment(line) return line:match(COMMENT_PATTERN) end
+
+local function is_comment(line) return parse_comment(line) ~= nil end
 
 -- Reshape the capture into the subset of ANSI baleia can render.
 local function normalize_ansi(text)
@@ -111,24 +119,26 @@ function M.submit()
 
   local out = { 'Comments on your last response:', '' }
   local count = 0
+  local seen = {}
   -- walk in buffer order, so deleting a comment line drops it from the submission
   -- and editing one picks up the new text
   for _, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
-    if is_comment(line) then
-      local n, text = line:match('^' .. PREFIX .. '%[(%d+)%]%s*(.*)$')
-      local excerpt = n and excerpts[buf][tonumber(n)]
-      if excerpt then
-        count = count + 1
-        -- the buffer's own number, not a fresh counter: deleting a comment leaves a
-        -- gap, and a gap is better than Claude calling [3] something you can still
-        -- see labelled [4] on your screen
-        table.insert(out, ('[%s] on:'):format(n))
-        for _, e in ipairs(excerpt) do
-          table.insert(out, '> ' .. e)
-        end
-        table.insert(out, 'comment: ' .. text)
-        table.insert(out, '')
+    local n, text = parse_comment(line)
+    local excerpt = n and excerpts[buf][tonumber(n)]
+    -- a yanked-and-put comment line carries its number along, and one note quoted
+    -- twice reads to Claude as two separate objections
+    if excerpt and not seen[n] then
+      seen[n] = true
+      count = count + 1
+      -- the buffer's own number, not a fresh counter: deleting a comment leaves a
+      -- gap, and a gap is better than Claude calling [3] something you can still
+      -- see labelled [4] on your screen
+      table.insert(out, ('[%s] on:'):format(n))
+      for _, e in ipairs(excerpt) do
+        table.insert(out, '> ' .. e)
       end
+      table.insert(out, 'comment: ' .. text)
+      table.insert(out, '')
     end
   end
 
