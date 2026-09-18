@@ -1,14 +1,27 @@
 -- Annotate Claude Code's output like a code review.
 --
 -- Launched by a tmux binding (see tmux/claude-review.conf), which opens this in a
--- popup over the Claude pane and passes that pane's id in. Select a block and
--- <leader>cm attaches a comment to it; <leader>pp pastes every comment back into
--- the pane and submits.
+-- popup over the Claude pane and passes that pane's id in. Select a block and the
+-- comment key attaches a note to it; the submit key pastes every note back into the
+-- pane as one message and submits.
 
 local M = {}
 
-local PREFIX = '>> '
-local HISTORY_LINES = 2000
+---@class ClaudeReviewConfig
+---@field history_lines integer how much pane scrollback to snapshot
+---@field prefix string marks a comment line in the buffer
+---@field keys { comment: string, submit: string, quit: string }
+local config = {
+  history_lines = 2000,
+  prefix = '>> ',
+  keys = {
+    comment = '<leader>cm',
+    submit = '<leader>pp',
+    quit = 'q',
+  },
+}
+
+-- tmux clipboard slot; internal, and nothing is gained by letting it be renamed
 local TMUX_BUFFER = 'claude-review'
 
 -- Excerpts cannot be re-derived from the buffer once comment lines are interleaved,
@@ -24,10 +37,23 @@ end
 -- Only the full `>> [n] text` shape counts as one of ours. A bare prefix test also
 -- claimed Claude's own output whenever it began with the prefix -- quoted text, a
 -- diff -- and such a line then dropped out of the excerpt with nothing said.
-local COMMENT_PATTERN = '^' .. PREFIX:gsub('%p', '%%%0') .. '%[(%d+)%]%s*(.*)$'
+local comment_pattern
+
+-- rebuilt when the prefix changes rather than per line, and escaped because a
+-- configured prefix may hold characters Lua patterns treat as syntax
+local function compile_pattern()
+  comment_pattern = '^' .. config.prefix:gsub('%p', '%%%0') .. '%[(%d+)%]%s*(.*)$'
+end
+compile_pattern()
+
+---@param opts ClaudeReviewConfig?
+function M.setup(opts)
+  config = vim.tbl_deep_extend('force', config, opts or {})
+  compile_pattern()
+end
 
 ---@return string? n, string? text
-local function parse_comment(line) return line:match(COMMENT_PATTERN) end
+local function parse_comment(line) return line:match(comment_pattern) end
 
 local function is_comment(line) return parse_comment(line) ~= nil end
 
@@ -48,7 +74,7 @@ function M.open(pane)
   -- -J rejoins the terminal's own hard wrapping, so one paragraph is one line and a
   -- bare `V` grabs a whole thought instead of a fragment
   -- -e keeps the SGR escape codes so baleia can restore Claude's bold and colours
-  local captured = tmux { 'capture-pane', '-p', '-e', '-J', '-t', pane, '-S', '-' .. HISTORY_LINES }
+  local captured = tmux { 'capture-pane', '-p', '-e', '-J', '-t', pane, '-S', '-' .. config.history_lines }
 
   local lines = vim.split(normalize_ansi(captured), '\n', { plain = true })
   -- a trailing blank line is not literally empty under -e: it still carries a reset
@@ -79,23 +105,27 @@ function M.open(pane)
   vim.o.timeoutlen = 1000
 
   local opts = { buffer = buf, silent = true }
-  vim.keymap.set(
+  local function map(mode, lhs, rhs, desc)
+    if lhs and lhs ~= '' then vim.keymap.set(mode, lhs, rhs, vim.tbl_extend('force', opts, { desc = desc })) end
+  end
+
+  map(
     'n',
-    '<leader>cm',
+    config.keys.comment,
     function() M.comment(vim.fn.line '.', vim.fn.line '.') end,
-    vim.tbl_extend('force', opts, { desc = 'Claude: co[m]ment this line' })
+    'Claude: co[m]ment this line'
   )
-  vim.keymap.set(
+  map(
     'x',
-    '<leader>cm',
+    config.keys.comment,
     ':<C-u>lua require("claude-review").comment_visual()<CR>',
-    vim.tbl_extend('force', opts, { desc = 'Claude: co[m]ment selection' })
+    'Claude: co[m]ment selection'
   )
-  vim.keymap.set('n', '<leader>pp', M.submit, vim.tbl_extend('force', opts, { desc = 'Claude: [p]ush comments' }))
+  map('n', config.keys.submit, M.submit, 'Claude: [p]ush comments')
   -- setting the lines marks the buffer modified, so plain `:q` refuses and leaving
   -- without commenting meant typing `:qa!`. Recording a macro in a snapshot you are
   -- about to throw away is not a thing anyone wants to do.
-  vim.keymap.set('n', 'q', '<Cmd>qa!<CR>', vim.tbl_extend('force', opts, { desc = 'Claude: [q]uit, discard comments' }))
+  map('n', config.keys.quit, '<Cmd>qa!<CR>', 'Claude: [q]uit, discard comments')
 
   vim.api.nvim_win_set_buf(0, buf)
   vim.wo[0].linebreak = true -- -J lines are long; break them at spaces, not mid-word
@@ -120,7 +150,7 @@ function M.comment(first, last)
     if not input or input == '' then return end
     local n = vim.tbl_count(excerpts[buf]) + 1
     excerpts[buf][n] = excerpt
-    vim.api.nvim_buf_set_lines(buf, last, last, false, { ('%s[%d] %s'):format(PREFIX, n, input) })
+    vim.api.nvim_buf_set_lines(buf, last, last, false, { ('%s[%d] %s'):format(config.prefix, n, input) })
   end)
 end
 
