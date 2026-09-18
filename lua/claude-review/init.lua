@@ -207,7 +207,9 @@ function M.submit()
   vim.cmd 'qa!'
 end
 
+-- clear = true, so reloading the module replaces this rather than stacking another copy
 vim.api.nvim_create_autocmd('BufDelete', {
+  group = vim.api.nvim_create_augroup('claude-review', { clear = true }),
   callback = function(ev) excerpts[ev.buf] = nil end,
 })
 
