@@ -1,8 +1,9 @@
 -- Annotate Claude Code's output like a code review.
 --
--- Launched by `Ctrl-a i` (tmux.conf), which opens this in a popup over the Claude
--- pane and passes that pane's id in. Select a block and <leader>cm attaches a
--- comment to it; <leader>pp pastes every comment back into the pane and submits.
+-- Launched by a tmux binding (see tmux/claude-review.conf), which opens this in a
+-- popup over the Claude pane and passes that pane's id in. Select a block and
+-- <leader>cm attaches a comment to it; <leader>pp pastes every comment back into
+-- the pane and submits.
 
 local M = {}
 
@@ -71,7 +72,7 @@ function M.open(pane)
   vim.keymap.set(
     'x',
     '<leader>cm',
-    ':<C-u>lua require("custom.claude-review").comment_visual()<CR>',
+    ':<C-u>lua require("claude-review").comment_visual()<CR>',
     vim.tbl_extend('force', opts, { desc = 'Claude: co[m]ment selection' })
   )
   vim.keymap.set('n', '<leader>pp', M.submit, vim.tbl_extend('force', opts, { desc = 'Claude: [p]ush comments' }))
