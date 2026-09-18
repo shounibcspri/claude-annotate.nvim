@@ -119,7 +119,10 @@ function M.submit()
       local excerpt = n and excerpts[buf][tonumber(n)]
       if excerpt then
         count = count + 1
-        table.insert(out, ('[%d] on:'):format(count))
+        -- the buffer's own number, not a fresh counter: deleting a comment leaves a
+        -- gap, and a gap is better than Claude calling [3] something you can still
+        -- see labelled [4] on your screen
+        table.insert(out, ('[%s] on:'):format(n))
         for _, e in ipairs(excerpt) do
           table.insert(out, '> ' .. e)
         end
