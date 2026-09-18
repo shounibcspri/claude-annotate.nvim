@@ -1,31 +1,32 @@
-# claude-review.lua — annotated walkthrough
+# claude-review — annotated walkthrough
 
-A plain-language tour of `claude-review.lua`, written as a way to learn nvim's Lua
-API using code you already own. Line numbers match the version of the file sitting
-next to this one; if you edit it, they drift.
+A plain-language tour of `lua/claude-review/init.lua`, written as a way to learn nvim's
+Lua API from something small and real. Sections follow the file top to bottom and are
+named after what they cover, so nothing here goes stale when a line moves.
 
 ## What the thing does
 
-From any tmux pane running Claude Code, `Ctrl-a i` opens an nvim popup holding a
+From any tmux pane running Claude Code, `prefix + i` opens an nvim popup holding a
 snapshot of that pane. You select a block of output, attach a comment to it, repeat
 for as many blocks as you like, then submit — all the comments go back to Claude as
 a single message and the popup closes.
 
 | Key | Where | Does |
 | --- | --- | --- |
-| `Ctrl-a i` | any Claude pane | open the popup with the last 2000 lines |
+| `prefix + i` | any Claude pane | open the popup with the last 2000 lines |
 | `V` + motion | popup | select a block (`Vip` = whole paragraph) |
 | `<leader>cm` | popup | prompt for a comment, insert `>> [n] ...` below the selection |
 | `dd` on a `>>` line | popup | drop that comment |
 | `<leader>pp` | popup | submit everything, close the popup |
+| `q` | popup | leave, discarding the comments |
 
-Leader is `<Space>`. The tmux side is the `bind i` block in `~/.config/tmux/tmux.conf`.
+The tmux side is `tmux/claude-review.conf`.
 
 ## How to look things up
 
-Put the cursor on any `vim.*` call in the file and press **`K`** — `lua_ls` is
-configured with the whole nvim runtime as its library (`lua/custom/plugins/lsp.lua`),
-so you get the real signature and docs inline.
+Put the cursor on any `vim.*` call in the file and press **`K`** — if `lua_ls` is
+configured with the nvim runtime as its library, you get the real signature and docs
+inline.
 
 - `:help lua-guide` — the one doc connecting Lua to nvim. Read this if you read nothing else.
 - `:help vim.fn`, `:help nvim_buf_get_lines()`, `:help visual-mode`
@@ -36,60 +37,76 @@ so you get the real signature and docs inline.
 
 `#x` is "length of x" (list length or string length). `..` glues strings together.
 
-## The skeleton — lines 7, 130
+## The skeleton
 
 ```lua
-local M = {}     -- line 7
+local M = {}     -- top of the file
 ...
-return M         -- line 130
+return M         -- bottom
 ```
 
 A file under `lua/` is a **module**. Whatever it returns is what `require` hands
-back, so `M` is the public surface: `M.open`, `M.comment`, `M.submit`. Anything
-declared `local` (like `tmux` on line 17) is private to the file.
+back, so `M` is the public surface: `M.setup`, `M.open`, `M.comment`, `M.submit`.
+Anything declared `local` (like the `tmux` helper) is private to the file.
 
 Nothing loads this at startup. The tmux popup runs
-`nvim -c "lua require([[custom.claude-review]]).open([[%35]])"`, and that `-c` is
-the only thing that ever loads it.
+`nvim -c "lua require([[claude-review]]).open([[%35]])"`, and that `-c` is the only
+thing that ever loads it.
 
-## The state — lines 9–15
+## The state
 
 ```lua
-local PREFIX = '>> '                   -- marks a comment line
-local HISTORY_LINES = 2000             -- how much scrollback to grab
+local config = { history_lines = 2000, prefix = '>> ', keys = { ... } }
 local TMUX_BUFFER = 'claude-review'    -- name of tmux's clipboard slot
 local excerpts = {}                    -- excerpts[bufnr][n] = the quoted lines
 ```
+
+`config` holds everything a user might reasonably want to change, and `M.setup` merges
+their table over it with `vim.tbl_deep_extend('force', ...)` — "deep" so passing one
+key under `keys` doesn't wipe the others. `TMUX_BUFFER` stays a constant because
+renaming an internal clipboard slot buys nothing.
 
 `excerpts` is the only piece of memory. **Buffer numbers ("bufnr")** are how nvim
 identifies open buffers — plain integers. Keying by bufnr means two review buffers
 can never tread on each other.
 
-## `tmux()` — lines 17–21
+One subtlety: the pattern that recognises a comment line is built from `config.prefix`,
+so it is recompiled in `setup` rather than rebuilt per line. It also runs the prefix
+through `gsub('%p', '%%%0')` first — a prefix like `| ` or `%% ` would otherwise be
+read as pattern syntax rather than as literal text.
+
+## `tmux()`
 
 Runs the `tmux` program and returns its stdout. `vim.system{...}` spawns a process,
 `:wait()` blocks until it finishes. Called as `tmux { 'capture-pane', ... }` — the
-`'tmux'` is prepended for you on line 18.
+`'tmux'` is prepended for you.
 
 Arguments are a **list, not a string**, so no shell is involved. Pane ids like `%35`
 and text with spaces never need quoting or escaping.
 
-## `is_comment()` — line 23
+## `parse_comment()` and `is_comment()`
 
 ```lua
-line:sub(1, #PREFIX) == PREFIX
+local function parse_comment(line) return line:match(comment_pattern) end
+local function is_comment(line) return parse_comment(line) ~= nil end
 ```
 
-"Do the first 3 characters equal `>> `?" — i.e. is this one of *my* comment lines
-rather than captured output.
+"Is this one of *my* comment lines rather than captured output?" — and if so, which
+number and what text.
 
-## `M.open(pane)` — lines 26–61
+The first version of this was `line:sub(1, #PREFIX) == PREFIX`, a plain prefix test,
+which is the obvious thing to write and quietly wrong: Claude prints lines starting
+with `>> ` of its own accord, and each one was then filtered out of the excerpt it
+belonged to. Requiring the whole `>> [n] text` shape fixes that, and having one
+function own the parse means the two callers cannot drift apart.
 
-**Capture** (29). Ask tmux for the pane's text. `-J` rejoins the terminal's own hard
+## `M.open(pane)`
+
+**Capture**. Ask tmux for the pane's text. `-J` rejoins the terminal's own hard
 wrapping so one paragraph becomes one line; `-S -2000` starts 2000 lines back in
 scrollback.
 
-**Clean** (31–35).
+**Clean**.
 
 ```lua
 local lines = vim.split(captured, '\n', { plain = true })
@@ -100,7 +117,7 @@ trailing blank lines, because tmux pads its output to the pane height. `%s` mean
 whitespace and `^...$` anchors to the whole line — those are Lua **patterns**, a
 simpler cousin of regex.
 
-**Build the buffer** (37–39).
+**Build the buffer**.
 
 | Call | Does |
 | --- | --- |
@@ -108,7 +125,7 @@ simpler cousin of regex.
 | `nvim_buf_set_name(...)` | just a label. `claude-review://%35` is not a real path — the `://` is a convention meaning "not a file" |
 | `nvim_buf_set_lines(buf, 0, -1, false, lines)` | replace lines 0 through end (`-1`) with our list |
 
-**Remember the pane** (40–41).
+**Remember the pane**.
 
 ```lua
 vim.b[buf].claude_pane = pane
@@ -117,13 +134,13 @@ vim.b[buf].claude_pane = pane
 `vim.b` is **buffer-local variables**. This is how `M.submit` knows where to paste
 later — the buffer carries it, and it dies with the buffer.
 
-**Keymaps** (43–56). `{ buffer = buf }` is the important part: these exist *only* in
+**Keymaps**. `{ buffer = buf }` is the important part: these exist *only* in
 this buffer, which is why `<leader>cm` does nothing in your normal files.
 
 Line 47, normal mode: `vim.fn.line('.')` is "current line number", passed as both
 start and end, so it comments just that one line.
 
-**Display** (58–60).
+**Display**.
 
 ```lua
 vim.api.nvim_win_set_buf(0, buf)                 -- show buf in the current window
@@ -142,15 +159,15 @@ window  = a viewport onto a buffer    vim.w, vim.wo
 global  = everything else             vim.g, vim.o
 ```
 
-## `M.comment_visual()` and `M.comment()` — lines 63–83
+## `M.comment_visual()` and `M.comment()`
 
 Line 63 reads the visual selection's boundary marks — `'<` where it started, `'>`
 where it ended — and passes two line numbers along.
 
-Why the visual-mode mapping (line 53) is a weird string rather than a function:
+Why the visual-mode mapping is a weird string rather than a function:
 
 ```lua
-':<C-u>lua require("custom.claude-review").comment_visual()<CR>'
+':<C-u>lua require("claude-review").comment_visual()<CR>'
 ```
 
 | Part | Effect |
@@ -163,7 +180,7 @@ Why the visual-mode mapping (line 53) is a weird string rather than a function:
 If it were a Lua function instead, the callback would run while *still in visual
 mode*, and the marks would still hold the **previous** selection.
 
-**Slice the selection** (69).
+**Slice the selection**.
 
 ```lua
 vim.api.nvim_buf_get_lines(buf, first - 1, last, false)
@@ -173,10 +190,10 @@ vim.api.nvim_buf_get_lines(buf, first - 1, last, false)
 > **0** and excludes the end. Hence `first - 1`. Off-by-one here is the most common
 > nvim scripting bug.
 
-**Filter** (71) drops any `>> ` lines the selection swept up. **Reject empties** (73):
-if no line has a non-whitespace character there's nothing to anchor to.
+**Filter** drops any comment lines the selection swept up. **Reject empties**: if no
+line has a non-whitespace character there's nothing to anchor to.
 
-**Ask for the comment** (77–82).
+**Ask for the comment**.
 
 ```lua
 vim.ui.input({ prompt = 'comment: ' }, function(input) ... end)
@@ -184,7 +201,7 @@ vim.ui.input({ prompt = 'comment: ' }, function(input) ... end)
 
 > **This is asynchronous.** It does *not* return your text. It shows a prompt and
 > calls your function *later*, once you press Enter. That's why the work lives inside
-> the function — anything written after line 82 would run before you finished typing.
+> the function — anything written after the call would run before you finished typing.
 
 Inside: number the comment, store the excerpt, insert the display line.
 
@@ -195,11 +212,13 @@ nvim_buf_set_lines(buf, last, last, false, { '>> [1] your text' })
 Start `last`, end `last` — a zero-width range, which means **insert** rather than
 replace.
 
-## `M.submit()` — lines 85–124
+## `M.submit()`
 
-**Walk the buffer** (94–108). For each comment line, line 96 pulls the number and
-text back out with a pattern: `%[(%d+)%]` matches `[1]` and captures the digits,
-`(.*)` captures the rest.
+**Walk the buffer**. For each line, `parse_comment` pulls the number and text back out
+with a pattern: `%[(%d+)%]` matches `[1]` and captures the digits, `(.*)` captures the
+rest. A line that doesn't match the whole shape isn't ours — Claude's own output
+sometimes starts with `>> `, and treating that as a note used to drop it out of the
+excerpt it belonged to.
 
 The deliberate split, and the reason the design works:
 
@@ -208,7 +227,7 @@ The deliberate split, and the reason the design works:
 - the **comment text** comes from the buffer line — so editing the wording counts,
   and `dd` on the line drops the whole note
 
-**Send it** (112–120).
+**Send it**.
 
 | Call | Does |
 | --- | --- |
@@ -224,7 +243,19 @@ The deliberate split, and the reason the design works:
 deferred timer would die with it — text pasted, never submitted. That failure is
 silent, which is what makes it worth a comment in the code.
 
-## The autocmd — lines 126–128
+The four tmux calls sit inside a `pcall`. The pane id was captured when the popup
+opened, and the pane can be killed or handed to another program in the meantime; the
+`tmux` helper raises on a non-zero exit, which without the `pcall` would surface as a
+stack trace and take your comments with it. On failure the popup stays open so the
+notes can still be copied out.
+
+It is worth naming what the 200ms does *not* do: it is a guess, not a handshake.
+Nothing checks that the paste landed or that Claude is idle. A slow paste means Enter
+arrives mid-message; a Claude already generating gets interrupted instead. Working
+around that properly would mean polling the pane, which is the next real improvement
+to this file.
+
+## The autocmd
 
 ```lua
 vim.api.nvim_create_autocmd('BufDelete', {
@@ -244,6 +275,10 @@ excerpts, so the table doesn't grow forever.
   for the mode**. Claude Code does; a plain `cat` does not.
 - `capture-pane -J` also preserves trailing spaces, but in practice adds at most one
   per line — not full-width padding.
+- `pcall(require, 'baleia')` is how you make a dependency genuinely optional. The
+  question to ask is not "is it installed" but "what is lost if it isn't" — here only
+  colour, so the missing case strips the escape codes with `strip_sgr` and carries on
+  rather than refusing to open.
 - Outside the popup these keys are not no-ops, because leader isn't a prefix there —
   the sequence degrades to `Space` (cursor right) followed by the bare keys.
   `cm` is harmless: `c` waits for a motion, `m` isn't one, so it aborts. `pp` is
