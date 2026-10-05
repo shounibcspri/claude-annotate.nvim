@@ -1,6 +1,6 @@
-# claude-review — annotated walkthrough
+# claude-annotate — annotated walkthrough
 
-A plain-language tour of `lua/claude-review/init.lua`, written as a way to learn nvim's
+A plain-language tour of `lua/claude-annotate/init.lua`, written as a way to learn nvim's
 Lua API from something small and real. Sections follow the file top to bottom and are
 named after what they cover, so nothing here goes stale when a line moves.
 
@@ -20,7 +20,7 @@ a single message and the popup closes.
 | `<leader>pp` | popup | submit everything, close the popup |
 | `q` | popup | leave, discarding the comments |
 
-The tmux side is `tmux/claude-review.conf`.
+The tmux side is `tmux/claude-annotate.conf`.
 
 ## How to look things up
 
@@ -50,14 +50,14 @@ back, so `M` is the public surface: `M.setup`, `M.open`, `M.comment`, `M.submit`
 Anything declared `local` (like the `tmux` helper) is private to the file.
 
 Nothing loads this at startup. The tmux popup runs
-`nvim -c "lua require([[claude-review]]).open([[%35]])"`, and that `-c` is the only
+`nvim -c "lua require([[claude-annotate]]).open([[%35]])"`, and that `-c` is the only
 thing that ever loads it.
 
 ## The state
 
 ```lua
 local config = { history_lines = 2000, prefix = '>> ', keys = { ... } }
-local TMUX_BUFFER = 'claude-review'    -- name of tmux's clipboard slot
+local TMUX_BUFFER = 'claude-annotate'    -- name of tmux's clipboard slot
 local excerpts = {}                    -- excerpts[bufnr][n] = the quoted lines
 ```
 
@@ -122,7 +122,7 @@ simpler cousin of regex.
 | Call | Does |
 | --- | --- |
 | `nvim_create_buf(true, true)` | make a buffer; args are `(listed, scratch)`. Scratch = no file on disk, no swapfile, `:w` refuses |
-| `nvim_buf_set_name(...)` | just a label. `claude-review://%35` is not a real path — the `://` is a convention meaning "not a file" |
+| `nvim_buf_set_name(...)` | just a label. `claude-annotate://%35` is not a real path — the `://` is a convention meaning "not a file" |
 | `nvim_buf_set_lines(buf, 0, -1, false, lines)` | replace lines 0 through end (`-1`) with our list |
 
 **Remember the pane**.
@@ -167,7 +167,7 @@ where it ended — and passes two line numbers along.
 Why the visual-mode mapping is a weird string rather than a function:
 
 ```lua
-':<C-u>lua require("claude-review").comment_visual()<CR>'
+':<C-u>lua require("claude-annotate").comment_visual()<CR>'
 ```
 
 | Part | Effect |

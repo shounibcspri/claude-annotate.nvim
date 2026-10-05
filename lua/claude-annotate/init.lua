@@ -1,13 +1,13 @@
 -- Annotate Claude Code's output like a code review.
 --
--- Launched by a tmux binding (see tmux/claude-review.conf), which opens this in a
+-- Launched by a tmux binding (see tmux/claude-annotate.conf), which opens this in a
 -- popup over the Claude pane and passes that pane's id in. Select a block and the
 -- comment key attaches a note to it; the submit key pastes every note back into the
 -- pane as one message and submits.
 
 local M = {}
 
----@class ClaudeReviewConfig
+---@class ClaudeAnnotateConfig
 ---@field history_lines integer how much pane scrollback to snapshot
 ---@field prefix string marks a comment line in the buffer
 ---@field keys { comment: string, submit: string, quit: string }
@@ -22,7 +22,7 @@ local config = {
 }
 
 -- tmux clipboard slot; internal, and nothing is gained by letting it be renamed
-local TMUX_BUFFER = 'claude-review'
+local TMUX_BUFFER = 'claude-annotate'
 
 -- Excerpts cannot be re-derived from the buffer once comment lines are interleaved,
 -- so keep them here, keyed by bufnr then comment number.
@@ -46,7 +46,7 @@ local function compile_pattern()
 end
 compile_pattern()
 
----@param opts ClaudeReviewConfig?
+---@param opts ClaudeAnnotateConfig?
 function M.setup(opts)
   config = vim.tbl_deep_extend('force', config, opts or {})
   compile_pattern()
@@ -81,18 +81,18 @@ function M.open(pane)
   while #lines > 0 and strip_sgr(lines[#lines]):match '^%s*$' do
     table.remove(lines)
   end
-  if #lines == 0 then return vim.notify('claude-review: pane ' .. pane .. ' is empty', vim.log.levels.WARN) end
+  if #lines == 0 then return vim.notify('claude-annotate: pane ' .. pane .. ' is empty', vim.log.levels.WARN) end
 
   local baleia_ok, baleia = pcall(require, 'baleia')
   if not baleia_ok then
     -- colour is a nicety, the excerpts are the point: a missing optional dependency
     -- should cost highlighting, not fill the buffer with literal escape codes
     lines = vim.tbl_map(strip_sgr, lines)
-    vim.notify('claude-review: baleia.nvim not found, output will not be coloured', vim.log.levels.WARN)
+    vim.notify('claude-annotate: baleia.nvim not found, output will not be coloured', vim.log.levels.WARN)
   end
 
   local buf = vim.api.nvim_create_buf(true, true)
-  vim.api.nvim_buf_set_name(buf, 'claude-review://' .. pane)
+  vim.api.nvim_buf_set_name(buf, 'claude-annotate://' .. pane)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   -- rewrites the lines without the escape codes and highlights them instead, so every
   -- later read of this buffer -- excerpts included -- sees plain text
@@ -118,7 +118,7 @@ function M.open(pane)
   map(
     'x',
     config.keys.comment,
-    ':<C-u>lua require("claude-review").comment_visual()<CR>',
+    ':<C-u>lua require("claude-annotate").comment_visual()<CR>',
     'Claude: co[m]ment selection'
   )
   map('n', config.keys.submit, M.submit, 'Claude: [p]ush comments')
@@ -136,14 +136,14 @@ function M.comment_visual() M.comment(vim.fn.line "'<", vim.fn.line "'>") end
 
 function M.comment(first, last)
   local buf = vim.api.nvim_get_current_buf()
-  if not excerpts[buf] then return vim.notify('claude-review: not a review buffer', vim.log.levels.WARN) end
+  if not excerpts[buf] then return vim.notify('claude-annotate: not a review buffer', vim.log.levels.WARN) end
 
   local selected = vim.api.nvim_buf_get_lines(buf, first - 1, last, false)
   -- a selection may span comment lines added earlier; they are not part of the excerpt
   local excerpt = vim.tbl_filter(function(l) return not is_comment(l) end, selected)
   -- blank lines inside a block are meaningful, but an all-blank excerpt anchors nothing
   if not vim.iter(excerpt):any(function(l) return l:match '%S' ~= nil end) then
-    return vim.notify('claude-review: nothing to anchor a comment to', vim.log.levels.WARN)
+    return vim.notify('claude-annotate: nothing to anchor a comment to', vim.log.levels.WARN)
   end
 
   vim.ui.input({ prompt = 'comment: ' }, function(input)
@@ -157,7 +157,7 @@ end
 function M.submit()
   local buf = vim.api.nvim_get_current_buf()
   local pane = vim.b[buf].claude_pane
-  if not pane or not excerpts[buf] then return vim.notify('claude-review: not a review buffer', vim.log.levels.WARN) end
+  if not pane or not excerpts[buf] then return vim.notify('claude-annotate: not a review buffer', vim.log.levels.WARN) end
 
   local out = { 'Comments on your last response:', '' }
   local count = 0
@@ -184,7 +184,7 @@ function M.submit()
     end
   end
 
-  if count == 0 then return vim.notify('claude-review: no comments to submit', vim.log.levels.WARN) end
+  if count == 0 then return vim.notify('claude-annotate: no comments to submit', vim.log.levels.WARN) end
 
   local tmpfile = vim.fn.tempname()
   vim.fn.writefile(out, tmpfile)
@@ -200,7 +200,7 @@ function M.submit()
   -- the pane can be killed or given to another program while the popup is open; stay
   -- open on failure so the comments are still there to copy out
   if not sent then
-    return vim.notify('claude-review: could not reach pane ' .. pane .. ': ' .. tostring(err), vim.log.levels.ERROR)
+    return vim.notify('claude-annotate: could not reach pane ' .. pane .. ': ' .. tostring(err), vim.log.levels.ERROR)
   end
 
   -- closes the popup, revealing the reply
@@ -209,7 +209,7 @@ end
 
 -- clear = true, so reloading the module replaces this rather than stacking another copy
 vim.api.nvim_create_autocmd('BufDelete', {
-  group = vim.api.nvim_create_augroup('claude-review', { clear = true }),
+  group = vim.api.nvim_create_augroup('claude-annotate', { clear = true }),
   callback = function(ev) excerpts[ev.buf] = nil end,
 })
 

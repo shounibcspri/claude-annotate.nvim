@@ -1,4 +1,4 @@
-# claude-review.nvim
+# claude-annotate.nvim
 
 Annotate Claude Code's output the way you'd annotate a pull request.
 
@@ -34,7 +34,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-  'shounibcspri/claude-review.nvim',
+  'shounibcspri/claude-annotate.nvim',
   dependencies = { 'm00qek/baleia.nvim' },
   -- opened by tmux, never at startup
   lazy = true,
@@ -44,11 +44,11 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 `opts = {}` is enough; the defaults are below.
 
-Then add the tmux binding from [`tmux/claude-review.conf`](tmux/claude-review.conf) to
+Then add the tmux binding from [`tmux/claude-annotate.conf`](tmux/claude-annotate.conf) to
 your `tmux.conf`, or source the file:
 
 ```tmux
-source-file ~/path/to/claude-review.nvim/tmux/claude-review.conf
+source-file ~/path/to/claude-annotate.nvim/tmux/claude-annotate.conf
 ```
 
 That binds `prefix + i`. Reload with `tmux source-file ~/.tmux.conf`.
@@ -69,7 +69,7 @@ Editing a `>> [n]` line changes what gets sent — the quoted excerpt stays atta
 ## Configure
 
 ```lua
-require('claude-review').setup {
+require('claude-annotate').setup {
   history_lines = 2000,      -- how much pane scrollback to snapshot
   prefix = '>> ',            -- marks a comment line
   keys = {
