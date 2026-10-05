@@ -30,6 +30,18 @@ Claude receives each comment paired with the exact text it's about.
 
 ## Install
 
+```sh
+git clone https://github.com/shounibcspri/claude-annotate.nvim && ./claude-annotate.nvim/install.sh
+```
+
+`install.sh` links the Lua module into `~/.config/nvim/lua/`, adds the `prefix + i`
+binding to your tmux config and loads it into a running server, and sources the pane
+tools from `~/.zshrc`. A step already in place is left alone, so re-running is safe, and
+the clone stays the live copy: `git pull` is the update. It also says which requirements
+are missing.
+
+### By hand
+
 With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
@@ -81,6 +93,18 @@ require('claude-annotate').setup {
 ```
 
 Set a key to `''` to skip that mapping. All mappings are buffer-local to the popup.
+
+## Pane tools (zsh)
+
+[`tmux/claude-panes.zsh`](tmux/claude-panes.zsh) adds `tmcheck` (`install.sh` sources it,
+or by hand: `source ~/path/to/claude-annotate.nvim/tmux/claude-panes.zsh`). It lists the
+Claude panes; a BROKEN one shows the background session it is attached to, and `tmcheck`
+offers to stop those sessions. Then `claude --resume <id>` in the pane brings it back in
+the foreground, with scrollback.
+
+A pane is BROKEN when it runs `claude attach <id>`: background sessions are always
+fullscreen, so the pane sits on the alternate screen with no scrollback. Both copy mode
+(`prefix + [`) and the popup's snapshot then see only the current screen. Needs `jq`.
 
 ## How it works
 
