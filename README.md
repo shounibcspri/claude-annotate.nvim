@@ -23,26 +23,36 @@ Claude receives each comment paired with the exact text it's about.
 
 ## Requires
 
-- Neovim 0.10+ (uses `vim.system`)
+- Neovim 0.10+ (uses `vim.system`); 0.12+ to install it with `vim.pack`
 - tmux
 - [baleia.nvim](https://github.com/m00qek/baleia.nvim) — optional, keeps Claude's
   colours. Without it the snapshot is plain text.
 
 ## Install
 
-```sh
-git clone https://github.com/shounibcspri/claude-annotate.nvim && ./claude-annotate.nvim/install.sh
+Install the plugin with your plugin manager, then run its `install.sh` once: that adds
+the `prefix + i` binding to your tmux config (and loads it into a running server) and
+sources the pane tools from `~/.zshrc`. Re-running it is safe, and it says which
+requirements are missing.
+
+### vim.pack (Neovim 0.12+)
+
+```lua
+vim.pack.add {
+  'https://github.com/shounibcspri/claude-annotate.nvim',
+  'https://github.com/m00qek/baleia.nvim', -- optional, keeps Claude's colours
+}
 ```
 
-`install.sh` links the Lua module into `~/.config/nvim/lua/`, adds the `prefix + i`
-binding to your tmux config and loads it into a running server, and sources the pane
-tools from `~/.zshrc`. A step already in place is left alone, so re-running is safe, and
-the clone stays the live copy: `git pull` is the update. It also says which requirements
-are missing.
+```sh
+~/.local/share/nvim/site/pack/core/opt/claude-annotate.nvim/install.sh
+```
 
-### By hand
+Nothing runs at startup: the module loads when tmux opens the popup. Call
+`require('claude-annotate').setup {}` only to change the defaults below.
+`:lua vim.pack.update()` updates it.
 
-With [lazy.nvim](https://github.com/folke/lazy.nvim):
+### lazy.nvim
 
 ```lua
 {
@@ -54,16 +64,27 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 }
 ```
 
-`opts = {}` is enough; the defaults are below.
+```sh
+~/.local/share/nvim/lazy/claude-annotate.nvim/install.sh
+```
 
-Then add the tmux binding from [`tmux/claude-annotate.conf`](tmux/claude-annotate.conf) to
-your `tmux.conf`, or source the file:
+### From a clone, to work on it
+
+```sh
+git clone https://github.com/shounibcspri/claude-annotate.nvim && ./claude-annotate.nvim/install.sh
+```
+
+Run from a clone, `install.sh` also links the Lua module into `~/.config/nvim/lua/`, so the
+clone is the live copy: edits show at the next popup, and `git pull` is the update.
+
+### tmux binding by hand
+
+Instead of `install.sh`, add the binding from
+[`tmux/claude-annotate.conf`](tmux/claude-annotate.conf) to your `tmux.conf`, or source it:
 
 ```tmux
 source-file ~/path/to/claude-annotate.nvim/tmux/claude-annotate.conf
 ```
-
-That binds `prefix + i`. Reload with `tmux source-file ~/.tmux.conf`.
 
 ## Use
 

@@ -12,7 +12,10 @@ echo "claude-annotate from $short"
 # --- nvim: put the module on the runtimepath via the config dir's lua/
 nvim_lua=${XDG_CONFIG_HOME:-$HOME/.config}/nvim/lua
 link=$nvim_lua/claude-annotate
-if [[ $(readlink "$link" 2>/dev/null) == "$repo/lua/claude-annotate" ]]; then
+# a copy installed by vim.pack or lazy.nvim lives in nvim's data dir and is already on the runtimepath
+if [[ $repo == "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/"* ]]; then
+  say ok "nvim  loaded by your plugin manager"
+elif [[ $(readlink "$link" 2>/dev/null) == "$repo/lua/claude-annotate" ]]; then
   say ok "nvim  $link"
 elif [[ -e $link || -L $link ]]; then
   say SKIP "nvim  $link already exists and is not this repo; move it away and re-run"
