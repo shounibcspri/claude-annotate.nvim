@@ -112,35 +112,77 @@ Set a key to `''` to skip that mapping. All mappings are buffer-local to the pop
 
 ## How it works
 
-The popup reads Claude's transcript, not the pane. Claude Code wraps its text at the
-pane's width as it writes it, so a snapshot of the pane carries line breaks for whatever
-width the pane had at the time, and a pane on the alternate screen has no scrollback at
-all. The transcript holds the markdown as Claude wrote it: a paragraph is one line, and
-nvim wraps it to the popup's width.
+`prefix + i` runs `tmux run-shell`, which expands `#{pane_id}` and opens nvim in a
+`display-popup` (a popup expands no formats itself and has no `TMUX_PANE`). nvim's `-c`
+calls `open(pane)`, the only thing that ever loads the module.
 
-Claude Code registers each running process in `~/.claude/sessions/<pid>.json`, and the
-popup looks there for the pane's own processes; a pane showing a background session
-names the job on screen. That gives the session, and `~/.claude/projects/*/<session>.jsonl`
-its transcript. The transcript is a tree, since an edited or re-sent prompt leaves its
-old branch behind, so the popup follows the parent links back from the newest record
-and shows your last `turns` prompts with Claude's replies, each under a heading counted
-from the end.
+### Why the transcript, not the pane
 
-Comments become `>> [n]` lines in the buffer, while the excerpt each one points at is
-held in memory — once comment lines are interleaved, the original block boundaries
-can't be recovered from the text. On submit the message goes through a tmux buffer and
-a bracketed paste, so the newlines don't submit it line by line. It is sent only while
-Claude is the pane's foreground program: a shell would run the excerpts as commands.
+Claude Code wraps its text at the pane's width as it writes it, with real line breaks.
+`capture-pane -J` rejoins only the terminal's own wraps, so a snapshot keeps them: a popup
+narrower than the pane wraps every full line again, and after a split one reply mixes two
+widths. A pane showing a background session is on the alternate screen, with no scrollback
+at all. The transcript, `~/.claude/projects/<dir>/<session-id>.jsonl`, holds the markdown as
+Claude produced it, one paragraph per line, and nvim wraps it to any width.
 
-[`doc/walkthrough.md`](doc/walkthrough.md) is a longer annotated tour of the source,
-written as a way to learn Neovim's Lua API from something small and real.
+### Finding the session
+
+Claude Code registers each running process in `~/.claude/sessions/<pid>.json`. `open` walks
+the pane's process (`#{pane_pid}`, usually a shell) and its descendants breadth-first, and
+takes the first one with a registry file. That entry's `parkedJobId`, set when the pane
+views a background job, or else its `sessionId`, names the transcript. Searching only under
+the pane means a crashed Claude's leftover file, a reused pid or the same pane id on another
+tmux server cannot match.
+
+### Rebuilding the conversation
+
+The transcript is one JSON record per line, and a tree: each record names its `parentUuid`,
+and an edited or re-sent prompt leaves its old branch behind. The popup follows the parents
+back from the newest record outside a subagent; a compaction starts a new chain whose root
+links the old one through `logicalParentUuid`.
+
+Many records are filed as `user`, but only your prompts start a turn: a `user` record with
+`origin.kind` `human`, or a `queued_command` attachment, which is all a prompt typed while
+Claude is busy gets. Tool results, slash commands, task notifications, messages from other
+sessions and interrupt markers are skipped. Claude's reply is its `text` blocks. Prompts
+sent before Claude says anything share the reply that follows.
+
+### The buffer
+
+```markdown
+## Response -2
+
+> your prompt
+
+  Claude's text, one paragraph per line
+```
+
+It shows the last `turns` turns, each under a heading counted from the end, which the
+markdown filetype's `[[` and `]]` jump between. Long lines wrap at spaces and hang under
+their list marker (`breakindent` with `list:-1`). Diagnostics are off: a linter would flag
+every paragraph's length.
+
+### Comments and submit
+
+A comment is a `>> [n] text` line below its excerpt, while the excerpt itself is kept in
+memory: once comment lines are interleaved, the block boundaries can't be recovered from the
+text. Rendered text never takes the comment shape, since prompts start with `> ` and
+Claude's text with two spaces. Submit reads each comment from its line, so editing it or
+`dd` counts.
+
+Before sending, submit checks that the pane's foreground program is still the Claude found
+at open: a suspended or exited Claude leaves a shell in front, which would run the excerpts
+as commands. It then pastes the message through a tmux buffer with `paste-buffer -p`, so the
+newlines don't submit it line by line, waits 200ms, presses Enter and closes the popup. On
+any failure the popup stays open with your comments.
 
 ## Known limits
 
 - Comments are single-line (`vim.ui.input`).
 - Nothing shows which lines an excerpt covers once the comment is inserted.
 - Submit waits a fixed 200ms between pasting and pressing Enter.
-- Only Claude's text is shown: thinking, tool calls and their output are left out.
+- Only Claude's text is shown: thinking, tool calls and their output are left out, and so
+  is any message Claude Code stores as thinking.
 - It reads Claude Code's own files, whose format can change with any release.
 - Untested on a pane running `claude attach <id>`.
 - tmux only.
