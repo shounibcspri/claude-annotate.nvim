@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install claude-annotate: the nvim module, the tmux binding and the zsh pane tools.
+# Install claude-annotate: the nvim module and the tmux binding.
 # Every step is skipped when already in place, so re-running is safe.
 set -euo pipefail
 
@@ -42,17 +42,8 @@ if tmux list-sessions &>/dev/null; then
   say loaded "tmux  prefix + i is live"
 fi
 
-# --- zsh: tmcheck; an existing source line anywhere in the zsh config counts
-zshrc=${ZDOTDIR:-$HOME}/.zshrc
-if grep -rqsF 'tmux/claude-panes.zsh' "$zshrc" "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"; then
-  say ok "zsh   tmcheck already sourced"
-else
-  printf '\n# claude-annotate: tmcheck\nsource %s/tmux/claude-panes.zsh\n' "$short" >> "$zshrc"
-  say added "zsh   $zshrc (open a new shell for tmcheck)"
-fi
-
 # --- requirements
-for cmd in nvim tmux jq claude; do
+for cmd in nvim tmux claude; do
   command -v "$cmd" &>/dev/null || say MISSING "$cmd"
 done
 if command -v nvim &>/dev/null; then
