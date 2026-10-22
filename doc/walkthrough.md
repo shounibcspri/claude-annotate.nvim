@@ -6,15 +6,16 @@ named after what they cover, so nothing here goes stale when a line moves.
 
 ## What the thing does
 
-From any tmux pane running Claude Code, `prefix + i` opens an nvim popup holding a
-snapshot of that pane. You select a block of output, attach a comment to it, repeat
-for as many blocks as you like, then submit — all the comments go back to Claude as
-a single message and the popup closes.
+From any tmux pane running Claude Code, `prefix + i` opens an nvim popup holding that
+pane's conversation, read from Claude's transcript. You select a block of output,
+attach a comment to it, repeat for as many blocks as you like, then submit — all the
+comments go back to Claude as a single message and the popup closes.
 
 | Key | Where | Does |
 | --- | --- | --- |
-| `prefix + i` | any Claude pane | open the popup with the last 2000 lines |
-| `V` + motion | popup | select a block (`Vip` = whole paragraph) |
+| `prefix + i` | any Claude pane | open the popup with your last 10 prompts and replies |
+| `V` + motion | popup | select a block (a paragraph is one line; `Vip` = a list) |
+| `[[` / `]]` | popup | jump to the previous / next response |
 | `<leader>cm` | popup | prompt for a comment, insert `>> [n] ...` below the selection |
 | `dd` on a `>>` line | popup | drop that comment |
 | `<leader>pp` | popup | submit everything, close the popup |
@@ -56,9 +57,10 @@ thing that ever loads it.
 ## The state
 
 ```lua
-local config = { history_lines = 2000, prefix = '>> ', keys = { ... } }
-local TMUX_BUFFER = 'claude-annotate'    -- name of tmux's clipboard slot
-local excerpts = {}                    -- excerpts[bufnr][n] = the quoted lines
+local config = { turns = 10, prefix = '>> ', keys = { ... } }
+local TMUX_BUFFER = 'claude-annotate'        -- name of tmux's clipboard slot
+local CLAUDE_DIR = vim.fn.expand '~/.claude' -- where Claude Code keeps its files
+local excerpts = {}                          -- excerpts[bufnr][n] = the quoted lines
 ```
 
 `config` holds everything a user might reasonably want to change, and `M.setup` merges
@@ -78,7 +80,7 @@ read as pattern syntax rather than as literal text.
 ## `tmux()`
 
 Runs the `tmux` program and returns its stdout. `vim.system{...}` spawns a process,
-`:wait()` blocks until it finishes. Called as `tmux { 'capture-pane', ... }` — the
+`:wait()` blocks until it finishes. Called as `tmux { 'paste-buffer', ... }` — the
 `'tmux'` is prepended for you.
 
 Arguments are a **list, not a string**, so no shell is involved. Pane ids like `%35`
@@ -91,7 +93,7 @@ local function parse_comment(line) return line:match(comment_pattern) end
 local function is_comment(line) return parse_comment(line) ~= nil end
 ```
 
-"Is this one of *my* comment lines rather than captured output?" — and if so, which
+"Is this one of *my* comment lines rather than Claude's output?" — and if so, which
 number and what text.
 
 The first version of this was `line:sub(1, #PREFIX) == PREFIX`, a plain prefix test,
@@ -100,30 +102,90 @@ with `>> ` of its own accord, and each one was then filtered out of the excerpt 
 belonged to. Requiring the whole `>> [n] text` shape fixes that, and having one
 function own the parse means the two callers cannot drift apart.
 
-## `M.open(pane)`
-
-**Capture**. Ask tmux for the pane's text. `-J` rejoins the terminal's own hard
-wrapping so one paragraph becomes one line; `-S -2000` starts 2000 lines back in
-scrollback.
-
-**Clean**.
+## `decode()`
 
 ```lua
-local lines = vim.split(captured, '\n', { plain = true })
+vim.json.decode(json, { luanil = { object = true, array = true } })
 ```
 
-tmux returns one big string; split it into a list. The `while` loop then drops
-trailing blank lines, because tmux pads its output to the pane height. `%s` means
-whitespace and `^...$` anchors to the whole line — those are Lua **patterns**, a
-simpler cousin of regex.
+Parses JSON text into a Lua table. By default a JSON `null` comes back as `vim.NIL`, a
+special value that is **truthy**, so `rec.parentUuid or rec.logicalParentUuid` would
+stop at it and never look at the second field. `luanil` makes `null` a plain `nil`. The
+`pcall` turns a line that isn't JSON into `nil` instead of an error.
+
+## `transcript_for()`
+
+Finds the transcript of the session running in the pane. Claude Code writes a small file
+per running process, `~/.claude/sessions/<pid>.json`. The pane's own process is usually
+a shell with Claude below it, so the function walks down from `#{pane_pid}`, nearest
+process first, and stops at the first one that has a file. Looking only under the pane
+keeps a crashed Claude's leftover file, or a pane with the same id on another tmux
+server, from matching.
+
+| Call | Does |
+| --- | --- |
+| `vim.api.nvim_get_proc_children(pid)` | the pids of a process's children |
+| `vim.uv.fs_stat(path)` | file info, or `nil` when there is no such file: a cheap existence test |
+| `vim.fn.readfile(path)` | the file as a list of lines |
+| `vim.fn.glob(pattern, false, true)` | expand a wildcard; the last `true` asks for a list, not one joined string |
+
+The walk is a **breadth-first** loop over a list that grows as it goes: it reads
+`queue[i]`, appends that process's children, moves `i` on, and ends when `queue[i]` is
+`nil`.
+
+A pane showing a background session is a *viewer*: its own session is parked, and
+`parkedJobId` names the job on screen. A job id is the start of that job's session id,
+which is why the last glob ends in `*.jsonl`.
+
+## `prompt_text()` and `read_turns()`
+
+A transcript has one JSON record per line (`.jsonl`). `io.lines(path)` reads it a line at
+a time. Two things make it more than a list:
+
+- **Not every `user` record is you.** Tool results, slash commands, task notifications
+  and messages from other Claude sessions are filed as `user` too. Only a record whose
+  `origin.kind` is `human` is a prompt you typed. A prompt typed while Claude is busy is
+  queued instead, and shows up only as an `attachment` of type `queued_command`.
+- **It is a tree.** Each record names its parent (`parentUuid`). Edit a prompt or send
+  it again, and the old branch stays in the file. So `read_turns` indexes every record
+  by `uuid`, starts at the newest and follows the parents back: that chain is the
+  conversation Claude actually has. It comes out newest first, which is why the loop
+  after it counts down (`for i = #chain, 1, -1`).
+
+Prompts sent before Claude says anything, such as a quick second message, join the same
+turn: one reply answers them all.
+
+## `render()`
+
+Turns the turns into buffer lines. Each turn opens with a heading counted from the end
+(`## Response -2`, `## Last response`), so the markdown filetype's own `[[` and `]]`
+jump between them. Your prompts get `> `, a markdown quote, so the syntax sets them
+apart; Claude's text gets two spaces, as Claude Code indents it. The two spaces also mean
+no line of Claude's can start with `>> [`, so none passes for a comment.
+
+```lua
+text:match '^\n*(.-)\n*$'
+```
+
+drops leading and trailing blank lines. `.-` is the *lazy* "anything", so the `\n*$`
+after it gets to eat the trailing newlines. These are Lua **patterns**, a simpler
+cousin of regex.
+
+## `M.open(pane)`
+
+**Read**. `transcript_for` finds the file, `read_turns` pulls the conversation out of it
+and `render` makes the lines. Either can come up empty, and an early
+`return vim.notify(...)` says so instead of opening a blank popup.
 
 **Build the buffer**.
 
 | Call | Does |
 | --- | --- |
 | `nvim_create_buf(true, true)` | make a buffer; args are `(listed, scratch)`. Scratch = no file on disk, no swapfile, `:w` refuses |
-| `nvim_buf_set_name(...)` | just a label. `claude-annotate://%35` is not a real path — the `://` is a convention meaning "not a file" |
+| `nvim_buf_set_name(...)` | just a label: `claude-annotate://<session id>` is not a real path — the `://` is a convention meaning "not a file" |
 | `nvim_buf_set_lines(buf, 0, -1, false, lines)` | replace lines 0 through end (`-1`) with our list |
+| `vim.bo[buf].filetype = 'markdown'` | the transcript *is* markdown, so this alone gives the highlighting |
+| `vim.diagnostic.enable(false, { bufnr = buf })` | no lint warnings here: it is a conversation, and every paragraph is one long line |
 
 **Remember the pane**.
 
@@ -137,14 +199,16 @@ later — the buffer carries it, and it dies with the buffer.
 **Keymaps**. `{ buffer = buf }` is the important part: these exist *only* in
 this buffer, which is why `<leader>cm` does nothing in your normal files.
 
-Line 47, normal mode: `vim.fn.line('.')` is "current line number", passed as both
+In normal mode, `vim.fn.line('.')` is "current line number", passed as both
 start and end, so it comments just that one line.
 
 **Display**.
 
 ```lua
 vim.api.nvim_win_set_buf(0, buf)                 -- show buf in the current window
-vim.wo[0].linebreak = true                       -- window-local option
+vim.wo[0].linebreak = true                       -- window-local option: wrap at spaces
+vim.wo[0].breakindent = true                     -- a wrapped line keeps its indent
+vim.wo[0].breakindentopt = 'list:-1'             -- ...or hangs under its list marker
 vim.api.nvim_win_set_cursor(0, { #lines, 0 })    -- jump to the last line
 ```
 
@@ -161,7 +225,7 @@ global  = everything else             vim.g, vim.o
 
 ## `M.comment_visual()` and `M.comment()`
 
-Line 63 reads the visual selection's boundary marks — `'<` where it started, `'>`
+`comment_visual` reads the visual selection's boundary marks — `'<` where it started, `'>`
 where it ended — and passes two line numbers along.
 
 Why the visual-mode mapping is a weird string rather than a function:
@@ -233,6 +297,7 @@ The deliberate split, and the reason the design works:
 | --- | --- |
 | `vim.fn.tempname()` | a temp file path |
 | `vim.fn.writefile(out, tmpfile)` | dump the message |
+| `#{pane_current_command}` vs `nvim_get_proc(pid).name` | send only while Claude is in front: a suspended or exited Claude leaves a shell, which would run the excerpts as commands |
 | `load-buffer` | load the file into a tmux clipboard slot |
 | `paste-buffer -d -p` | paste into the pane. `-p` = bracketed paste, so the newlines don't submit line by line; `-d` deletes the slot after |
 | `vim.wait(200)` | block 200ms so Claude Code processes the paste |
@@ -243,11 +308,11 @@ The deliberate split, and the reason the design works:
 deferred timer would die with it — text pasted, never submitted. That failure is
 silent, which is what makes it worth a comment in the code.
 
-The four tmux calls sit inside a `pcall`. The pane id was captured when the popup
-opened, and the pane can be killed or handed to another program in the meantime; the
-`tmux` helper raises on a non-zero exit, which without the `pcall` would surface as a
-stack trace and take your comments with it. On failure the popup stays open so the
-notes can still be copied out.
+The tmux calls sit inside a `pcall`. The pane id was captured when the popup opened, and
+the pane can be killed or handed to another program in the meantime; the `tmux` helper
+raises on a non-zero exit, which without the `pcall` would surface as a stack trace and
+take your comments with it. The check that Claude is in front raises too, so it takes the
+same path: on failure the popup stays open and the notes can still be copied out.
 
 It is worth naming what the 200ms does *not* do: it is a guess, not a handshake.
 Nothing checks that the paste landed or that Claude is idle. A slow paste means Enter
@@ -273,12 +338,13 @@ excerpts, so the table doesn't grow forever.
   `run-shell -b` (which *does* expand formats) and passes the pane id in explicitly.
 - `paste-buffer -p` emits bracketed-paste markers **only if the receiving app asked
   for the mode**. Claude Code does; a plain `cat` does not.
-- `capture-pane -J` also preserves trailing spaces, but in practice adds at most one
-  per line — not full-width padding.
-- `pcall(require, 'baleia')` is how you make a dependency genuinely optional. The
-  question to ask is not "is it installed" but "what is lost if it isn't" — here only
-  colour, so the missing case strips the escape codes with `strip_sgr` and carries on
-  rather than refusing to open.
+- A pane is a poor source for Claude's text. Claude Code wraps its lines itself, at the
+  pane's width, so `capture-pane -J` (which rejoins only the terminal's own wraps)
+  leaves them broken, and a popup narrower than the pane breaks them again. Lines
+  written before a split keep the old width: tmux cuts them mid-word, and `-J` only
+  puts them back.
+- A pane can show a background session while running plain `claude`, with no
+  `attach <id>` on its command line. The registry's `parkedJobId` still names the job.
 - Outside the popup these keys are not no-ops, because leader isn't a prefix there —
   the sequence degrades to `Space` (cursor right) followed by the bare keys.
   `cm` is harmless: `c` waits for a motion, `m` isn't one, so it aborts. `pp` is

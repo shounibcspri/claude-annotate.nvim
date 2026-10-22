@@ -2,7 +2,7 @@
 #
 # A pane running `claude attach <id>` draws on the terminal's alternate screen: background
 # sessions are always fullscreen, so tmux keeps no scrollback for that pane and copy mode
-# (prefix + [) and the prefix + i snapshot see only the current screen. Resuming the session in the foreground instead
+# (prefix + [) sees only the current screen. Resuming the session in the foreground instead
 # gives the classic renderer and normal scrollback.
 
 # List Claude panes; for BROKEN ones show the attached background session and offer to stop it.

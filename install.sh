@@ -58,5 +58,4 @@ done
 if command -v nvim &>/dev/null; then
   probe() { nvim --headless -c "lua io.write($1 and '1' or '0')" -c 'qa!' 2>/dev/null; }
   [[ $(probe 'vim.fn.has("nvim-0.10") == 1') == 1 ]] || say MISSING "nvim 0.10+ (uses vim.system)"
-  [[ $(probe 'pcall(require, "baleia")') == 1 ]] || say note "baleia.nvim not found: the popup works, without colours"
 fi

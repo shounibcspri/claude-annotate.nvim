@@ -7,9 +7,9 @@ assumed something you never said. Replying in prose means restating each part be
 you can object to it. This attaches comments directly to the lines they're about, then
 sends them all as one message.
 
-Press a key in the tmux pane running Claude and a popup opens over it holding a
-snapshot of the output. Select a block, attach a comment, repeat. Submit, and the
-popup closes as Claude starts answering.
+Press a key in the tmux pane running Claude and a popup opens over it holding the
+conversation, read from Claude's transcript. Select a block, attach a comment, repeat.
+Submit, and the popup closes as Claude starts answering.
 
 ```
 > the function should probably validate the input before hashing it
@@ -25,8 +25,7 @@ Claude receives each comment paired with the exact text it's about.
 
 - Neovim 0.10+ (uses `vim.system`); 0.12+ to install it with `vim.pack`
 - tmux
-- [baleia.nvim](https://github.com/m00qek/baleia.nvim) — optional, keeps Claude's
-  colours. Without it the snapshot is plain text.
+- Claude Code: the popup reads its session files (tested with 2.1.295 to 2.1.308)
 
 ## Install
 
@@ -38,10 +37,7 @@ requirements are missing.
 ### vim.pack (Neovim 0.12+)
 
 ```lua
-vim.pack.add {
-  'https://github.com/shounibcspri/claude-annotate.nvim',
-  'https://github.com/m00qek/baleia.nvim', -- optional, keeps Claude's colours
-}
+vim.pack.add { 'https://github.com/shounibcspri/claude-annotate.nvim' }
 ```
 
 ```sh
@@ -57,7 +53,6 @@ Nothing runs at startup: the module loads when tmux opens the popup. Call
 ```lua
 {
   'shounibcspri/claude-annotate.nvim',
-  dependencies = { 'm00qek/baleia.nvim' },
   -- opened by tmux, never at startup
   lazy = true,
   opts = {},
@@ -91,7 +86,8 @@ source-file ~/path/to/claude-annotate.nvim/tmux/claude-annotate.conf
 | Key | Where | Does |
 | --- | --- | --- |
 | `prefix + i` | any Claude pane | open the popup over it |
-| `V` + motion | popup | select a block (`Vip` takes a whole paragraph) |
+| `V` + motion | popup | select a block (a paragraph is one line; `Vip` takes a list) |
+| `[[` / `]]` | popup | jump to the previous / next response (`## Response -2`, `## Last response`) |
 | `<leader>cm` | popup | prompt for a comment, insert `>> [n] ...` below the selection |
 | `dd` on a `>>` line | popup | drop that comment |
 | `<leader>pp` | popup | submit everything and close |
@@ -103,7 +99,7 @@ Editing a `>> [n]` line changes what gets sent — the quoted excerpt stays atta
 
 ```lua
 require('claude-annotate').setup {
-  history_lines = 2000,      -- how much pane scrollback to snapshot
+  turns = 10,                -- how many of your latest prompts to show, with replies
   prefix = '>> ',            -- marks a comment line
   keys = {
     comment = '<leader>cm',
@@ -124,17 +120,31 @@ offers to stop those sessions. Then `claude --resume <id>` in the pane brings it
 the foreground, with scrollback.
 
 A pane is BROKEN when it runs `claude attach <id>`: background sessions are always
-fullscreen, so the pane sits on the alternate screen with no scrollback. Both copy mode
-(`prefix + [`) and the popup's snapshot then see only the current screen. Needs `jq`.
+fullscreen, so the pane sits on the alternate screen with no scrollback, and copy mode
+(`prefix + [`) sees only the current screen. The popup reads the transcript instead, so
+it still works there. Needs `jq`.
 
 ## How it works
 
-`capture-pane -e -J` snapshots the pane, keeping colour and rejoining the terminal's
-hard wrapping so one paragraph is one line. Comments become `>> [n]` lines in the
-buffer, while the excerpt each one points at is held in memory — once comment lines are
-interleaved, the original block boundaries can't be recovered from the text. On submit
-the message goes through a tmux buffer and a bracketed paste, so the newlines don't
-submit it line by line.
+The popup reads Claude's transcript, not the pane. Claude Code wraps its text at the
+pane's width as it writes it, so a snapshot of the pane carries line breaks for whatever
+width the pane had at the time, and a pane on the alternate screen has no scrollback at
+all. The transcript holds the markdown as Claude wrote it: a paragraph is one line, and
+nvim wraps it to the popup's width.
+
+Claude Code registers each running process in `~/.claude/sessions/<pid>.json`, and the
+popup looks there for the pane's own processes; a pane showing a background session
+names the job on screen. That gives the session, and `~/.claude/projects/*/<session>.jsonl`
+its transcript. The transcript is a tree, since an edited or re-sent prompt leaves its
+old branch behind, so the popup follows the parent links back from the newest record
+and shows your last `turns` prompts with Claude's replies, each under a heading counted
+from the end.
+
+Comments become `>> [n]` lines in the buffer, while the excerpt each one points at is
+held in memory — once comment lines are interleaved, the original block boundaries
+can't be recovered from the text. On submit the message goes through a tmux buffer and
+a bracketed paste, so the newlines don't submit it line by line. It is sent only while
+Claude is the pane's foreground program: a shell would run the excerpts as commands.
 
 [`doc/walkthrough.md`](doc/walkthrough.md) is a longer annotated tour of the source,
 written as a way to learn Neovim's Lua API from something small and real.
@@ -144,6 +154,9 @@ written as a way to learn Neovim's Lua API from something small and real.
 - Comments are single-line (`vim.ui.input`).
 - Nothing shows which lines an excerpt covers once the comment is inserted.
 - Submit waits a fixed 200ms between pasting and pressing Enter.
+- Only Claude's text is shown: thinking, tool calls and their output are left out.
+- It reads Claude Code's own files, whose format can change with any release.
+- Untested on a pane running `claude attach <id>`.
 - tmux only.
 
 ## License
