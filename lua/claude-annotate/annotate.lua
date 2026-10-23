@@ -1,19 +1,20 @@
--- The review buffer that editor.lua and tmux.lua open: the conversation, read from Claude
+-- The annotate buffer that editor.lua and tmux.lua open: the conversation, read from Claude
 -- Code's transcript, and comments attached to excerpts of it. Select a block and the
 -- comment key attaches a note; the submit key turns every note into one message and hands
--- it to the `send` the opener passed in.
-
+-- it back to whoever opened the buffer: tmux.lua pushes it into the Claude pane,
+-- editor.lua saves it into Claude's prompt file.
 local M = {}
 
 local CLAUDE_DIR = vim.fn.expand '~/.claude'
 
--- the config of the review being shown; one nvim shows one review
+-- the config of the annotate on screen
 local config
 
 -- Excerpts cannot be re-derived from the buffer once comment lines are interleaved,
 -- so keep them here, keyed by bufnr then comment number.
 local excerpts = {}
-local senders = {}
+-- what submit does with the message, keyed by bufnr: the handler open was given
+local on_submit = {}
 
 -- Only the full `>> [n] text` shape counts as one of ours. A bare prefix test also
 -- claimed Claude's own output whenever it began with the prefix -- quoted text, a
@@ -69,9 +70,16 @@ local function prompt_text(rec)
   return table.concat(texts, '\n')
 end
 
--- The file is a tree: an edited or re-sent prompt leaves its old branch behind, so the
--- conversation is the chain of parents back from the newest record. A compaction starts
--- a new chain, whose root links the old one as its logicalParentUuid.
+-- Every record names the one before it, its parentUuid. Editing or re-sending a prompt
+-- starts a new branch from the same parent, and the old branch stays in the file:
+--
+--   A - B - C            C: your prompt before the edit
+--        \- C' - D       C': the edited prompt, D: Claude's reply to it
+--
+-- Read top to bottom, the file holds both branches. Walking back from the newest record
+-- (D) through the parents gives D C' B A, only the conversation you are in. A compaction
+-- starts a new chain, whose first record points at the old chain's last one through
+-- logicalParentUuid, so the walk carries on into it.
 ---@return { prompt: string, reply: string[] }[] turns oldest first
 local function read_turns(path)
   local by_uuid, newest = {}, nil
@@ -91,6 +99,9 @@ local function read_turns(path)
     rec = by_uuid[rec.parentUuid or rec.logicalParentUuid]
   end
 
+  -- The chain is newest first, so walk it backwards, grouping records into turns: a prompt
+  -- of yours starts one, and Claude's text blocks after it are its reply. Everything else,
+  -- tool calls and their results included, is skipped.
   local turns = {}
   for i = #chain, 1, -1 do
     local prompt = prompt_text(chain[i])
@@ -139,9 +150,9 @@ end
 
 ---@param transcript string the session's .jsonl
 ---@param cfg ClaudeAnnotateConfig
----@param send fun(lines: string[]) delivers the message to Claude
----@return boolean opened false when the session has nothing to review yet
-function M.open(transcript, cfg, send)
+---@param handler fun(lines: string[]) takes the message on submit: pushes or saves it
+---@return boolean opened false when the session has nothing to annotate yet
+function M.open(transcript, cfg, handler)
   config = cfg
   -- escaped, because a configured prefix may hold characters Lua patterns treat as syntax
   comment_pattern = '^' .. config.prefix:gsub('%p', '%%%0') .. '%[(%d+)%]%s*(.*)$'
@@ -157,10 +168,10 @@ function M.open(transcript, cfg, send)
   -- a conversation, not a document: markdownlint's line length rule alone flags every paragraph
   vim.diagnostic.enable(false, { bufnr = buf })
   excerpts[buf] = {}
-  senders[buf] = send
+  on_submit[buf] = handler
 
   -- a leader sequence timing out in visual mode runs `c` raw, deleting the selection;
-  -- timeoutlen is global-only, but this nvim runs for the review alone, so nothing leaks out
+  -- timeoutlen is global-only, but this nvim runs for annotating alone, so nothing leaks out
   vim.o.timeoutlen = 1000
 
   local opts = { buffer = buf, silent = true }
@@ -168,6 +179,9 @@ function M.open(transcript, cfg, send)
     if lhs and lhs ~= '' then vim.keymap.set(mode, lhs, rhs, vim.tbl_extend('force', opts, { desc = desc })) end
   end
 
+  -- The buffer's keys, from config.keys, which exist only in this buffer: comment the
+  -- current line (normal mode) or the selection (visual mode), and submit. Plain :q
+  -- leaves without sending: a scratch buffer never counts as modified.
   map(
     'n',
     config.keys.comment,
@@ -181,10 +195,6 @@ function M.open(transcript, cfg, send)
     'Claude: co[m]ment selection'
   )
   map('n', config.keys.submit, M.submit, 'Claude: [p]ush comments')
-  -- setting the lines marks the buffer modified, so plain `:q` refuses and leaving
-  -- without commenting meant typing `:qa!`. Recording a macro in a snapshot you are
-  -- about to throw away is not a thing anyone wants to do.
-  map('n', config.keys.quit, '<Cmd>qa!<CR>', 'Claude: [q]uit, discard comments')
 
   vim.api.nvim_win_set_buf(0, buf)
   -- a paragraph arrives as one line: wrap it at spaces, under its list marker if it has one
@@ -199,7 +209,7 @@ function M.comment_visual() M.comment(vim.fn.line "'<", vim.fn.line "'>") end
 
 function M.comment(first, last)
   local buf = vim.api.nvim_get_current_buf()
-  if not excerpts[buf] then return vim.notify('claude-annotate: not a review buffer', vim.log.levels.WARN) end
+  if not excerpts[buf] then return vim.notify('claude-annotate: not an annotate buffer', vim.log.levels.WARN) end
 
   local selected = vim.api.nvim_buf_get_lines(buf, first - 1, last, false)
   -- a selection may span comment lines added earlier; they are not part of the excerpt
@@ -219,7 +229,7 @@ end
 
 function M.submit()
   local buf = vim.api.nvim_get_current_buf()
-  if not excerpts[buf] then return vim.notify('claude-annotate: not a review buffer', vim.log.levels.WARN) end
+  if not excerpts[buf] then return vim.notify('claude-annotate: not an annotate buffer', vim.log.levels.WARN) end
 
   local out = { 'Comments on this conversation:', '' }
   local count = 0
@@ -247,7 +257,7 @@ function M.submit()
   end
 
   if count == 0 then return vim.notify('claude-annotate: no comments to submit', vim.log.levels.WARN) end
-  senders[buf](out)
+  on_submit[buf](out)
 end
 
 -- clear = true, so reloading the module replaces this rather than stacking another copy
@@ -255,7 +265,7 @@ vim.api.nvim_create_autocmd('BufDelete', {
   group = vim.api.nvim_create_augroup('claude-annotate', { clear = true }),
   callback = function(ev)
     excerpts[ev.buf] = nil
-    senders[ev.buf] = nil
+    on_submit[ev.buf] = nil
   end,
 })
 

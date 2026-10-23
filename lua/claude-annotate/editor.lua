@@ -1,5 +1,5 @@
--- Claude Code's ctrl+g: it opens nvim on its prompt file, and this shows the review
--- instead. Submit writes the message into that file, which Claude loads into its
+-- Claude Code's ctrl+g: it opens nvim on its prompt file, and this opens the annotate
+-- buffer instead. Submit writes the message into that file, which Claude loads into its
 -- input once nvim exits; Enter sends it.
 
 local annotate = require 'claude-annotate.annotate'
@@ -18,7 +18,7 @@ local function claude_above()
 end
 
 -- A draft typed before ctrl+g stays in front of the notes.
-local function send(prompt, lines)
+local function save(prompt, lines)
   while lines[#lines] == '' do
     table.remove(lines)
   end
@@ -36,8 +36,8 @@ function M.attach(file)
     local config = require('claude-annotate').config()
     local pid = claude_above()
     local transcript = pid and annotate.transcript_of(pid)
-    if transcript and not annotate.open(transcript, config, function(lines) send(file, lines) end) then
-      vim.notify 'claude-annotate: nothing to review yet, so this is the prompt as usual'
+    if transcript and not annotate.open(transcript, config, function(lines) save(file, lines) end) then
+      vim.notify 'claude-annotate: nothing to annotate yet, so this is the prompt as usual'
     end
   end
   if vim.v.vim_did_enter == 1 then

@@ -1,21 +1,21 @@
--- Annotate Claude Code's output like a code review. Two ways open the review:
+-- Annotate Claude Code's output the way you'd annotate a pull request. Two ways open the
+-- annotate buffer:
 --   editor.lua  Claude Code's own ctrl+g; submit fills Claude's input
 --   tmux.lua    a tmux popup on prefix + i, once its binding is installed; submit sends
--- Both open the same review buffer, annotate.lua.
+-- Both open the same annotate buffer, annotate.lua.
 
 local M = {}
 
 ---@class ClaudeAnnotateConfig
 ---@field last_n_response integer how many of Claude's latest responses to show, each with your prompt
 ---@field prefix string marks a comment line in the buffer
----@field keys { comment: string, submit: string, quit: string }
+---@field keys { comment: string, submit: string }
 local config = {
   last_n_response = 10,
   prefix = '>> ',
   keys = {
     comment = '<leader>cm',
     submit = '<leader>pp',
-    quit = 'q',
   },
 }
 
@@ -29,8 +29,11 @@ local hooked = false
 function M.hook()
   if hooked then return end
   hooked = true
-  local file = vim.fn.argc() == 1 and vim.fn.fnamemodify(vim.fn.argv(0), ':p')
-  if file and vim.fs.basename(file):match '^claude%-prompt%-.+%.md$' then require('claude-annotate.editor').attach(file) end
+  -- argv() is typed for both its forms, a list or one string; argv(0) is the string
+  local file = vim.fn.argc() == 1 and vim.fn.fnamemodify(vim.fn.argv(0) --[[@as string]], ':p')
+  if file and vim.fs.basename(file):match '^claude%-prompt%-.+%.md$' then
+    require('claude-annotate.editor').attach(file)
+  end
 end
 
 ---@param opts ClaudeAnnotateConfig?
@@ -40,7 +43,7 @@ function M.setup(opts)
 end
 
 -- what the tmux binding calls
----@param pane string tmux pane id to review, e.g. '%35'
+---@param pane string tmux pane id to annotate, e.g. '%35'
 function M.open(pane) require('claude-annotate.tmux').open(pane, config) end
 
 return M

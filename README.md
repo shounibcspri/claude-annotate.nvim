@@ -1,64 +1,81 @@
 # claude-annotate.nvim
 
-Annotate Claude Code's output the way you'd annotate a pull request.
+Annotate Claude Code's output the way you'd review a pull request.
 
-Claude gives you a long answer. Three paragraphs are right, one is wrong, and one
-assumed something you never said. Replying in prose means restating each part before
-you can object to it. This attaches comments directly to the lines they're about, then
-sends them all as one message.
+When you want to discuss specific points of Claude's last answer, a reply in prose has to
+restate each point before it can say anything about it. claude-annotate lets you comment
+on the exact lines instead, in nvim, and sends all the comments back as one message.
 
-The review holds the conversation, read from Claude's transcript. Select a block, attach
-a comment, repeat, then submit. Two keys open it:
+Two keys open it:
 
-- **`ctrl+g`, by default:** Claude Code's own key for editing the prompt in your editor
-  opens the review instead, in any terminal. Submit puts the comments in Claude's input
-  box, and you press Enter.
-- **`prefix + i`, optional:** in the tmux pane running Claude, a popup over it. Submit sends
-  the comments, and the popup closes as Claude starts answering.
+- **`ctrl+g` in Claude Code.** Claude Code's `ctrl+g` normally opens your prompt in an
+  external editor. With nvim as that editor, the plugin takes it over: instead of an empty
+  prompt, nvim shows the conversation, ready to annotate. On submit, your comments go into
+  Claude's prompt, and you press Enter to send them. It works in any terminal.
+- **`prefix + i` in tmux, optional.** If you run Claude Code in tmux, this opens the same
+  conversation in a tmux popup over the pane, without going through Claude's editor. On
+  submit, the comments are sent straight away.
+
+## How it looks
+
+Claude answers a prompt. In nvim, each response sits under a heading, after the prompt
+that asked for it, with one paragraph or list item per line:
+
+```markdown
+## Last response
+
+> make the payment call more robust
+
+  I made two changes:
+  - the input is now validated before it is hashed
+  - the call to the payment service is retried, with exponential backoff
+```
+
+You select the lines you want to discuss and attach a comment to each. A comment appears
+right below what it is about:
+
+```markdown
+  - the input is now validated before it is hashed
+>> [1] no need, it's an internal call and the boundary already validates
+  - the call to the payment service is retried, with exponential backoff
+>> [2] the call isn't idempotent, so a retry could charge twice
+```
+
+When you submit, Claude gets each comment with the exact text it is about:
 
 ```
-> the function should probably validate the input before hashing it
->> [1] no, it's an internal call site, the boundary already validates
+Comments on this conversation:
 
-> I've added a retry with exponential backoff
->> [2] this is the bit I disagree with -- the call isn't idempotent
+[1] on:
+>   - the input is now validated before it is hashed
+comment: no need, it's an internal call and the boundary already validates
+
+[2] on:
+>   - the call to the payment service is retried, with exponential backoff
+comment: the call isn't idempotent, so a retry could charge twice
 ```
-
-Claude receives each comment paired with the exact text it's about.
 
 ## Requires
 
 - Neovim 0.10+ (uses `vim.system`); 0.12+ to install it with `vim.pack`. Classic Vim can't
   run it: it is built on Neovim's Lua API.
-- Claude Code: the review reads its session files (tested with 2.1.295 to 2.1.309)
-- nvim as Claude Code's editor, since that is what `ctrl+g` opens: `install.sh` sets it in
-  Claude's settings, or set `$VISUAL` or `$EDITOR` yourself
-- `jq`, for `install.sh` to edit those settings
+- Claude Code: the plugin reads its session files (tested with 2.1.295 to 2.1.309)
+- For `install.sh`: `jq`, to edit Claude Code's settings
 - For the tmux popup: tmux
 
 ## Install
 
-Install the plugin with your plugin manager, then run its `install.sh` once. It sets
-`"VISUAL": "nvim"` under `"env"` in `~/.claude/settings.json`, so `ctrl+g` opens nvim while
-the editor you use elsewhere stays, and it keeps a `VISUAL` already set there. Where tmux
-is installed, it also adds the popup's `prefix + i` binding to your tmux config and loads
-it into a running server. Re-running it is safe, and it says which requirements are
-missing.
+Three steps by hand, or `install.sh` for the last two.
 
-### vim.pack (Neovim 0.12+)
+### 1. Install the plugin
+
+With `vim.pack` (Neovim 0.12+), which `:lua vim.pack.update()` then updates:
 
 ```lua
 vim.pack.add { 'https://github.com/shounibcspri/claude-annotate.nvim' }
 ```
 
-```sh
-~/.local/share/nvim/site/pack/core/opt/claude-annotate.nvim/install.sh
-```
-
-At startup the plugin only checks whether nvim was opened on Claude's prompt file; `setup`
-is needed only to change the defaults below. `:lua vim.pack.update()` updates it.
-
-### lazy.nvim
+With lazy.nvim:
 
 ```lua
 {
@@ -69,8 +86,37 @@ is needed only to change the defaults below. `:lua vim.pack.update()` updates it
 }
 ```
 
+At startup the plugin only checks whether nvim was opened on Claude's prompt file; call
+`setup` only to change the defaults below.
+
+### 2. Make nvim Claude Code's editor
+
+`ctrl+g` opens `$VISUAL`, else `$EDITOR`. To have it open nvim without changing the editor
+you use elsewhere, set it in Claude Code's own settings, `~/.claude/settings.json`:
+
+```json
+{ "env": { "VISUAL": "nvim" } }
+```
+
+### 3. Optional: the tmux popup
+
+Add the binding from [`tmux/claude-annotate.conf`](tmux/claude-annotate.conf) to your
+`tmux.conf`, or source it:
+
+```tmux
+source-file ~/path/to/claude-annotate.nvim/tmux/claude-annotate.conf
+```
+
+### Or let install.sh do steps 2 and 3
+
+After step 1, run the plugin's `install.sh` once. It sets `VISUAL` in Claude Code's
+settings unless one is already there, and where tmux is installed, it adds the binding
+and loads it into a running server. It is safe to re-run, and says which requirements
+are missing.
+
 ```sh
-~/.local/share/nvim/lazy/claude-annotate.nvim/install.sh
+~/.local/share/nvim/site/pack/core/opt/claude-annotate.nvim/install.sh   # vim.pack
+~/.local/share/nvim/lazy/claude-annotate.nvim/install.sh                 # lazy.nvim
 ```
 
 ### From a clone, to work on it
@@ -80,32 +126,22 @@ git clone https://github.com/shounibcspri/claude-annotate.nvim && ./claude-annot
 ```
 
 Run from a clone, `install.sh` also links the Lua module into `~/.config/nvim/lua/`, so the
-clone is the live copy: edits show at the next review, and `git pull` is the update. Only
-`lua/` is linked, not `plugin/`, so call `require('claude-annotate').setup {}` in your
-config for `ctrl+g`.
-
-### By hand
-
-Instead of `install.sh`, add `"VISUAL": "nvim"` under `"env"` in `~/.claude/settings.json`,
-and for the tmux popup, add the binding from
-[`tmux/claude-annotate.conf`](tmux/claude-annotate.conf) to your `tmux.conf`, or source it:
-
-```tmux
-source-file ~/path/to/claude-annotate.nvim/tmux/claude-annotate.conf
-```
+clone is the live copy: edits show the next time you annotate, and `git pull` is the
+update. Only `lua/` is linked, not `plugin/`, so call `require('claude-annotate').setup {}`
+in your config for `ctrl+g`.
 
 ## Use
 
 | Key | Where | Does |
 | --- | --- | --- |
-| `ctrl+g` | Claude Code's input | open the review instead of the prompt editor |
-| `prefix + i` | a Claude pane in tmux, popup installed | open the review in a popup over it |
-| `V` + motion | review | select a block (a paragraph is one line; `Vip` takes a list) |
-| `[[` / `]]` | review | jump to the previous / next response |
-| `<leader>cm` | review | prompt for a comment, insert `>> [n] ...` below the selection |
-| `dd` on a `>>` line | review | drop that comment |
-| `<leader>pp` | review | submit and close: from `ctrl+g` fills Claude's input, from the popup sends |
-| `q` | review | leave, discarding the comments (from `ctrl+g`, your draft is kept) |
+| `ctrl+g` | Claude Code's input | open the annotate buffer instead of the prompt editor |
+| `prefix + i` | a Claude pane in tmux, popup installed | open the annotate buffer in a popup over it |
+| `V` + motion | annotate buffer | select a block (a paragraph is one line; `Vip` takes a list) |
+| `[[` / `]]` | annotate buffer | jump to the previous / next response |
+| `<leader>cm` | annotate buffer | prompt for a comment, insert `>> [n] ...` below the selection |
+| `dd` on a `>>` line | annotate buffer | drop that comment |
+| `<leader>pp` | annotate buffer | submit and close: from `ctrl+g` fills Claude's input, from the popup sends |
+| `:q` | annotate buffer | leave, discarding the comments (from `ctrl+g`, your draft is kept) |
 
 Editing a `>> [n]` line changes what gets sent — the quoted excerpt stays attached.
 
@@ -118,30 +154,29 @@ require('claude-annotate').setup {
   keys = {
     comment = '<leader>cm',
     submit = '<leader>pp',
-    quit = 'q',
   },
 }
 ```
 
-Set a key to `''` to skip that mapping. All mappings are buffer-local to the review. The
-tmux popup needs no option: installing its binding is what turns it on.
+Set a key to `''` to skip that mapping. All mappings are buffer-local to the annotate
+buffer. The tmux popup needs no option: installing its binding is what turns it on.
 
 ## How it works
 
 Under `lua/claude-annotate/`, `init.lua` holds the config and routes. `editor.lua` handles
-`ctrl+g` and `tmux.lua` the tmux popup; both open the same review buffer, `annotate.lua`,
+`ctrl+g` and `tmux.lua` the tmux popup; both open the same annotate buffer, `annotate.lua`,
 and hand it a function that delivers the message.
 
 **`ctrl+g`.** Claude Code writes your draft to a temp file named `claude-prompt-<uuid>.md`
 and runs `$VISUAL`, else `$EDITOR`, on it as its own child process. Once the editor exits,
 it loads the file into its input. At startup, `plugin/claude-annotate.lua` (or `setup`)
 spots that file, finds the Claude above nvim's process (the code runs in `nvim --embed`,
-under the nvim drawing the screen), and opens the review on its session. Opened on such a
-file by anything else, nvim just edits it.
+under the nvim drawing the screen), and opens the annotate buffer on its session. Opened
+on such a file by anything else, nvim just edits it.
 
 **The tmux popup.** `prefix + i` runs `tmux run-shell`, which expands `#{pane_id}` and opens
 nvim in a `display-popup` (a popup expands no formats itself and has no `TMUX_PANE`). nvim's
-`-c` calls `open(pane)`. In a pane with no Claude session, or nothing to review yet, the
+`-c` calls `open(pane)`. In a pane with no Claude session, or nothing to annotate yet, the
 popup closes again and tmux's status line says why.
 
 ### Why the transcript, not the pane
@@ -156,7 +191,7 @@ Claude produced it, one paragraph per line, and nvim wraps it to any width.
 ### Finding the session
 
 Claude Code registers each running process in `~/.claude/sessions/<pid>.json`. From
-`ctrl+g`, the review walks up from nvim's process to the first one with a registry file.
+`ctrl+g`, the plugin walks up from nvim's process to the first one with a registry file.
 The popup walks down instead, from the pane's process (`#{pane_pid}`, usually a shell)
 through its descendants, breadth-first: searching only under the pane means a crashed
 Claude's leftover file, a reused pid or the same pane id on another tmux server cannot
@@ -166,7 +201,7 @@ match. The entry's `parkedJobId`, set when the pane views a background job, or e
 ### Rebuilding the conversation
 
 The transcript is one JSON record per line, and a tree: each record names its `parentUuid`,
-and an edited or re-sent prompt leaves its old branch behind. The review follows the parents
+and an edited or re-sent prompt leaves its old branch behind. The plugin follows the parents
 back from the newest record outside a subagent; a compaction starts a new chain whose root
 links the old one through `logicalParentUuid`.
 
