@@ -238,7 +238,8 @@ end
 -- deleting a comment line drops it, and editing one picks up the new text.
 ---@return string[]? lines
 local function message(buf)
-  local out = { 'Comments on this conversation:' }
+  -- split, since writefile would turn a newline inside one line into a NUL
+  local out = config.header ~= '' and vim.split(config.header, '\n', { plain = true }) or {}
   local seen = {}
   for _, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
     local n, text = parse_comment(line)
@@ -250,7 +251,8 @@ local function message(buf)
       -- the buffer's own number, not a fresh counter: deleting a comment leaves a
       -- gap, and a gap is better than Claude calling [3] something you can still
       -- see labelled [4] on your screen
-      vim.list_extend(out, { '', ('[%s] on:'):format(n) })
+      if #out > 0 then table.insert(out, '') end
+      table.insert(out, ('[%s] on:'):format(n))
       for _, e in ipairs(excerpt) do
         table.insert(out, '> ' .. e)
       end

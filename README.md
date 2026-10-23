@@ -153,6 +153,7 @@ Editing a `>> [n]` line changes what gets sent — the quoted excerpt stays atta
 require('claude-annotate').setup {
   last_n_response = 10,      -- how many of Claude's latest responses to show
   prefix = '>> ',            -- marks a comment line
+  header = 'Comments on this conversation:', -- opens the message; '' leaves it out
   keys = {
     comment = '<leader>cm',
     submit = '<leader>pp',
