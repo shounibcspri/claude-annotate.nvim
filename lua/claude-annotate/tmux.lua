@@ -1,0 +1,69 @@
+-- The tmux popup, optional: its binding (see tmux/claude-annotate.conf) opens nvim in a
+-- popup over the Claude pane and passes that pane's id in. Submit pastes the message into
+-- the pane and presses Enter.
+
+local annotate = require 'claude-annotate.annotate'
+
+local M = {}
+
+-- tmux clipboard slot; internal, and nothing is gained by letting it be renamed
+local TMUX_BUFFER = 'claude-annotate'
+
+local function tmux(args)
+  local res = vim.system(vim.list_extend({ 'tmux' }, args), { text = true }):wait()
+  if res.code ~= 0 then error('tmux failed: ' .. (res.stderr or '')) end
+  return res.stdout or ''
+end
+
+-- Searching only the pane's own process tree, nearest first, rules out a crashed Claude's
+-- leftover file, a reused pid and a pane with the same id on another tmux server.
+---@return integer? pid
+local function claude_in_pane(pane)
+  local queue = { tonumber(tmux { 'display', '-p', '-t', pane, '#{pane_pid}' }) }
+  local i = 1
+  while queue[i] do
+    if annotate.registered(queue[i]) then return queue[i] end
+    vim.list_extend(queue, vim.api.nvim_get_proc_children(queue[i]))
+    i = i + 1
+  end
+end
+
+local function send(pane, pid, lines)
+  local tmpfile = vim.fn.tempname()
+  vim.fn.writefile(lines, tmpfile)
+  local sent, err = pcall(function()
+    -- a suspended or exited Claude leaves a shell in front, which would run the excerpts as
+    -- commands: a line like `>   notes.md is …` empties notes.md
+    local front = vim.trim(tmux { 'display', '-p', '-t', pane, '#{pane_current_command}' })
+    local claude = vim.api.nvim_get_proc(pid)
+    if not claude or claude.name ~= front then error(front .. ' is in front, not Claude', 0) end
+    tmux { 'load-buffer', '-b', TMUX_BUFFER, tmpfile }
+    -- -p wraps in bracketed paste so the newlines do not submit line by line
+    tmux { 'paste-buffer', '-b', TMUX_BUFFER, '-d', '-p', '-t', pane }
+    -- block rather than defer: we exit immediately after, and a deferred timer would
+    -- die with nvim, leaving the text pasted but never submitted
+    vim.wait(200)
+    tmux { 'send-keys', '-t', pane, 'Enter' }
+  end)
+  -- the pane can be killed or given to another program while the popup is open; stay
+  -- open on failure so the comments are still there to copy out
+  if not sent then
+    return vim.notify('claude-annotate: could not reach pane ' .. pane .. ': ' .. tostring(err), vim.log.levels.ERROR)
+  end
+
+  -- closes the popup, revealing the reply
+  vim.cmd 'qa!'
+end
+
+---@param pane string tmux pane id to review, e.g. '%35'
+---@param config ClaudeAnnotateConfig
+function M.open(pane, config)
+  local pid = claude_in_pane(pane)
+  local transcript = pid and annotate.transcript_of(pid)
+  if not transcript then
+    return vim.notify('claude-annotate: no Claude session found in pane ' .. pane, vim.log.levels.WARN)
+  end
+  annotate.open(transcript, config, function(lines) send(pane, pid, lines) end)
+end
+
+return M

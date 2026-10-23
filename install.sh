@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install claude-annotate: the nvim module and the tmux binding.
+# Install claude-annotate: make nvim Claude Code's ctrl+g editor, add the tmux popup
+# (prefix + i) where tmux is installed, and from a clone, link the nvim module.
 # Every step is skipped when already in place, so re-running is safe.
 set -euo pipefail
 
@@ -25,25 +26,47 @@ else
   say added "nvim  $link -> $short/lua/claude-annotate"
 fi
 
-# --- tmux: source the binding from the first config tmux itself would load
-tmux_conf=$HOME/.tmux.conf
-for f in "$HOME/.tmux.conf" "${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux.conf"; do
-  if [[ -f $f ]]; then tmux_conf=$f; break; fi
-done
-if grep -qsF 'tmux/claude-annotate.conf' "$tmux_conf"; then
-  say ok "tmux  $tmux_conf"
+# --- claude: ctrl+g opens $VISUAL. Set in Claude Code's own settings, it leaves the editor
+# you use elsewhere alone; a VISUAL already set there is kept. Written through a link, so a
+# settings.json kept in dotfiles stays linked.
+# readlink -f fails on a missing directory, which a machine without Claude Code yet has
+mkdir -p "$HOME/.claude"
+settings=$(readlink -f "$HOME/.claude/settings.json")
+if ! command -v jq &>/dev/null; then
+  say MISSING "jq, to set \"VISUAL\": \"nvim\" under \"env\" in ~/.claude/settings.json"
+elif visual=$(jq -er '.env.VISUAL' "$settings" 2>/dev/null); then
+  say ok "claude ctrl+g opens $visual"
 else
-  printf '\n# claude-annotate: prefix + i\nsource-file %s/tmux/claude-annotate.conf\n' "$short" >> "$tmux_conf"
-  say added "tmux  $tmux_conf"
+  mkdir -p "${settings%/*}"
+  [[ -s $settings ]] || echo '{}' > "$settings"
+  jq '.env.VISUAL = "nvim"' "$settings" > "$settings.tmp"
+  mv "$settings.tmp" "$settings"
+  say added "claude ctrl+g opens nvim (env.VISUAL in ~/.claude/settings.json)"
 fi
-# a running server only reads its config at start
-if tmux list-sessions &>/dev/null; then
-  tmux source-file "$repo/tmux/claude-annotate.conf"
-  say loaded "tmux  prefix + i is live"
+
+# --- tmux, for the popup: source the binding from the first config tmux itself would load
+if ! command -v tmux &>/dev/null; then
+  say skip "tmux  not installed: no popup, ctrl+g alone"
+else
+  tmux_conf=$HOME/.tmux.conf
+  for f in "$HOME/.tmux.conf" "${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux.conf"; do
+    if [[ -f $f ]]; then tmux_conf=$f; break; fi
+  done
+  if grep -qsF 'tmux/claude-annotate.conf' "$tmux_conf"; then
+    say ok "tmux  $tmux_conf"
+  else
+    printf '\n# claude-annotate: prefix + i\nsource-file %s/tmux/claude-annotate.conf\n' "$short" >> "$tmux_conf"
+    say added "tmux  $tmux_conf"
+  fi
+  # a running server only reads its config at start
+  if tmux list-sessions &>/dev/null; then
+    tmux source-file "$repo/tmux/claude-annotate.conf"
+    say loaded "tmux  prefix + i is live"
+  fi
 fi
 
 # --- requirements
-for cmd in nvim tmux claude; do
+for cmd in nvim claude; do
   command -v "$cmd" &>/dev/null || say MISSING "$cmd"
 done
 if command -v nvim &>/dev/null; then
