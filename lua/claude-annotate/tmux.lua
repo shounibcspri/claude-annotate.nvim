@@ -28,31 +28,34 @@ local function claude_in_pane(pane)
   end
 end
 
-local function push(pane, pid, lines)
+-- Pastes the message into Claude's prompt in the pane; with `enter`, also sends it.
+---@return boolean pasted
+local function paste(pane, pid, lines, enter)
   local tmpfile = vim.fn.tempname()
-  vim.fn.writefile(lines, tmpfile)
-  local sent, err = pcall(function()
+  -- binary, so no newline follows the last line and the prompt does not end on a blank one
+  vim.fn.writefile(lines, tmpfile, 'b')
+  local ok, err = pcall(function()
     -- a suspended or exited Claude leaves a shell in front, which would run the excerpts as
     -- commands: a line like `>   notes.md is …` empties notes.md
     local front = vim.trim(tmux { 'display', '-p', '-t', pane, '#{pane_current_command}' })
     local claude = vim.api.nvim_get_proc(pid)
-    if not claude or claude.name ~= front then error(front .. ' is in front, not Claude', 0) end
+    if not claude or claude.name ~= front then error((front ~= '' and front or 'nothing') .. ' is in front, not Claude', 0) end
     tmux { 'load-buffer', '-b', TMUX_BUFFER, tmpfile }
     -- -p wraps in bracketed paste so the newlines do not submit line by line
     tmux { 'paste-buffer', '-b', TMUX_BUFFER, '-d', '-p', '-t', pane }
-    -- block rather than defer: we exit immediately after, and a deferred timer would
-    -- die with nvim, leaving the text pasted but never submitted
-    vim.wait(200)
-    tmux { 'send-keys', '-t', pane, 'Enter' }
+    if enter then
+      -- block rather than defer: nvim exits right after, and a deferred timer would die
+      -- with it, leaving the text pasted but never sent
+      vim.wait(200)
+      tmux { 'send-keys', '-t', pane, 'Enter' }
+    end
   end)
-  -- the pane can be killed or given to another program while the popup is open; stay
-  -- open on failure so the comments are still there to copy out
-  if not sent then
-    return vim.notify('claude-annotate: could not reach pane ' .. pane .. ': ' .. tostring(err), vim.log.levels.ERROR)
+  -- the pane can be killed or given to another program while the popup is open; staying
+  -- open on failure keeps the comments there to copy out
+  if not ok then
+    vim.notify('claude-annotate: could not reach pane ' .. pane .. ': ' .. tostring(err), vim.log.levels.ERROR)
   end
-
-  -- closes the popup, revealing the reply
-  vim.cmd 'qa!'
+  return ok
 end
 
 -- Nothing to annotate: close the popup rather than leave a bare nvim behind, whose
@@ -69,9 +72,12 @@ function M.open(pane, config)
   local pid = claude_in_pane(pane)
   local transcript = pid and annotate.transcript_of(pid)
   if not transcript then return leave(pane, 'no Claude session in this pane') end
-  if not annotate.open(transcript, config, function(lines) push(pane, pid, lines) end) then
-    leave(pane, 'nothing to annotate yet')
-  end
+  local opened = annotate.open(transcript, config, {
+    -- :w puts the comments in Claude's prompt for you to send; <leader>pp sends them too
+    save = function(lines) return paste(pane, pid, lines, false) end,
+    push = function(lines) return paste(pane, pid, lines, true) end,
+  })
+  if not opened then leave(pane, 'nothing to annotate yet') end
 end
 
 return M

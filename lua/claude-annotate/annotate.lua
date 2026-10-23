@@ -1,9 +1,12 @@
 -- The annotate buffer that editor.lua and tmux.lua open: the conversation, read from Claude
 -- Code's transcript, and comments attached to excerpts of it. Select a block and the
--- comment key attaches a note; the submit key turns every note into one message and hands
--- it back to whoever opened the buffer: tmux.lua pushes it into the Claude pane,
--- editor.lua saves it into Claude's prompt file.
+-- comment key attaches a note. Saving (:w, :wq) turns every note into one message and hands
+-- it to the opener's save, which puts it in Claude's prompt; the push key hands it to the
+-- opener's push, which also sends it where it can. Both close nvim once they worked.
 local M = {}
+
+-- clear = true, so reloading the module replaces its autocmds rather than stacking copies
+local group = vim.api.nvim_create_augroup('claude-annotate', { clear = true })
 
 local CLAUDE_DIR = vim.fn.expand '~/.claude'
 
@@ -13,8 +16,8 @@ local config
 -- Excerpts cannot be re-derived from the buffer once comment lines are interleaved,
 -- so keep them here, keyed by bufnr then comment number.
 local excerpts = {}
--- what submit does with the message, keyed by bufnr: the handler open was given
-local on_submit = {}
+-- the opener's save and push, keyed by bufnr
+local handlers = {}
 
 -- Only the full `>> [n] text` shape counts as one of ours. A bare prefix test also
 -- claimed Claude's own output whenever it began with the prefix -- quoted text, a
@@ -150,9 +153,9 @@ end
 
 ---@param transcript string the session's .jsonl
 ---@param cfg ClaudeAnnotateConfig
----@param handler fun(lines: string[]) takes the message on submit: pushes or saves it
+---@param opener { save: fun(lines: string[]): boolean, push: fun(lines: string[]): boolean }
 ---@return boolean opened false when the session has nothing to annotate yet
-function M.open(transcript, cfg, handler)
+function M.open(transcript, cfg, opener)
   config = cfg
   -- escaped, because a configured prefix may hold characters Lua patterns treat as syntax
   comment_pattern = '^' .. config.prefix:gsub('%p', '%%%0') .. '%[(%d+)%]%s*(.*)$'
@@ -164,11 +167,16 @@ function M.open(transcript, cfg, handler)
   -- the session id, so which conversation you are looking at can be read at a glance
   vim.api.nvim_buf_set_name(buf, 'claude-annotate://' .. vim.fn.fnamemodify(transcript, ':t:r'))
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  -- written by the plugin, so :w saves the comments. Unmodified until you comment, so a
+  -- plain :q leaves; once you have, :q asks for :q! like any editor before losing them
+  vim.bo[buf].buftype = 'acwrite'
+  vim.bo[buf].modified = false
+  vim.api.nvim_create_autocmd('BufWriteCmd', { group = group, buffer = buf, callback = function() M.save() end })
   vim.bo[buf].filetype = 'markdown'
   -- a conversation, not a document: markdownlint's line length rule alone flags every paragraph
   vim.diagnostic.enable(false, { bufnr = buf })
   excerpts[buf] = {}
-  on_submit[buf] = handler
+  handlers[buf] = opener
 
   -- a leader sequence timing out in visual mode runs `c` raw, deleting the selection;
   -- timeoutlen is global-only, but this nvim runs for annotating alone, so nothing leaks out
@@ -180,8 +188,7 @@ function M.open(transcript, cfg, handler)
   end
 
   -- The buffer's keys, from config.keys, which exist only in this buffer: comment the
-  -- current line (normal mode) or the selection (visual mode), and submit. Plain :q
-  -- leaves without sending: a scratch buffer never counts as modified.
+  -- current line (normal mode) or the selection (visual mode), and push.
   map(
     'n',
     config.keys.comment,
@@ -194,7 +201,7 @@ function M.open(transcript, cfg, handler)
     ':<C-u>lua require("claude-annotate.annotate").comment_visual()<CR>',
     'Claude: co[m]ment selection'
   )
-  map('n', config.keys.submit, M.submit, 'Claude: [p]ush comments')
+  map('n', config.keys.submit, M.push, 'Claude: [p]ush comments')
 
   vim.api.nvim_win_set_buf(0, buf)
   -- a paragraph arrives as one line: wrap it at spaces, under its list marker if it has one
@@ -227,15 +234,12 @@ function M.comment(first, last)
   end)
 end
 
-function M.submit()
-  local buf = vim.api.nvim_get_current_buf()
-  if not excerpts[buf] then return vim.notify('claude-annotate: not an annotate buffer', vim.log.levels.WARN) end
-
-  local out = { 'Comments on this conversation:', '' }
-  local count = 0
+-- Every note as one message, or nil when there is none. The buffer is read in order, so
+-- deleting a comment line drops it, and editing one picks up the new text.
+---@return string[]? lines
+local function message(buf)
+  local out = { 'Comments on this conversation:' }
   local seen = {}
-  -- walk in buffer order, so deleting a comment line drops it from the submission
-  -- and editing one picks up the new text
   for _, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
     local n, text = parse_comment(line)
     local excerpt = n and excerpts[buf][tonumber(n)]
@@ -243,29 +247,47 @@ function M.submit()
     -- twice reads to Claude as two separate objections
     if excerpt and not seen[n] then
       seen[n] = true
-      count = count + 1
       -- the buffer's own number, not a fresh counter: deleting a comment leaves a
       -- gap, and a gap is better than Claude calling [3] something you can still
       -- see labelled [4] on your screen
-      table.insert(out, ('[%s] on:'):format(n))
+      vim.list_extend(out, { '', ('[%s] on:'):format(n) })
       for _, e in ipairs(excerpt) do
         table.insert(out, '> ' .. e)
       end
       table.insert(out, 'comment: ' .. text)
-      table.insert(out, '')
     end
   end
-
-  if count == 0 then return vim.notify('claude-annotate: no comments to submit', vim.log.levels.WARN) end
-  on_submit[buf](out)
+  if next(seen) then return out end
 end
 
--- clear = true, so reloading the module replaces this rather than stacking another copy
+---@param how 'save'|'push'
+local function deliver(how)
+  local buf = vim.api.nvim_get_current_buf()
+  if not excerpts[buf] then return vim.notify('claude-annotate: not an annotate buffer', vim.log.levels.WARN) end
+  local lines = message(buf)
+  if not lines then
+    -- nothing to lose by leaving, so :wq goes on to quit
+    vim.bo[buf].modified = false
+    return vim.notify('claude-annotate: no comments to send', vim.log.levels.WARN)
+  end
+  -- a failed paste stays open, still modified, so the comments are there to retry
+  if handlers[buf][how](lines) then
+    vim.bo[buf].modified = false
+    vim.cmd 'qa!'
+  end
+end
+
+-- :w and :wq: put the comments in Claude's prompt
+function M.save() deliver 'save' end
+
+-- the push key: put them there and send them, where the opener can
+function M.push() deliver 'push' end
+
 vim.api.nvim_create_autocmd('BufDelete', {
-  group = vim.api.nvim_create_augroup('claude-annotate', { clear = true }),
+  group = group,
   callback = function(ev)
     excerpts[ev.buf] = nil
-    on_submit[ev.buf] = nil
+    handlers[ev.buf] = nil
   end,
 })
 

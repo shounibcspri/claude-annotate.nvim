@@ -10,11 +10,12 @@ Two keys open it:
 
 - **`ctrl+g` in Claude Code.** Claude Code's `ctrl+g` normally opens your prompt in an
   external editor. With nvim as that editor, the plugin takes it over: instead of an empty
-  prompt, nvim shows the conversation, ready to annotate. On submit, your comments go into
-  Claude's prompt, and you press Enter to send them. It works in any terminal.
+  prompt, nvim shows the conversation, ready to annotate. Saving (`:wq`) puts your comments
+  in Claude's prompt, and you press Enter there to send them. It works in any terminal.
 - **`prefix + i` in tmux, optional.** If you run Claude Code in tmux, this opens the same
-  conversation in a tmux popup over the pane, without going through Claude's editor. On
-  submit, the comments are sent straight away.
+  conversation in a tmux popup over the pane, without going through Claude's editor.
+  Saving puts the comments in Claude's prompt the same way, and `<leader>pp` also sends
+  them.
 
 ## How it looks
 
@@ -41,7 +42,7 @@ right below what it is about:
 >> [2] the call isn't idempotent, so a retry could charge twice
 ```
 
-When you submit, Claude gets each comment with the exact text it is about:
+When you save or push, Claude gets each comment with the exact text it is about:
 
 ```
 Comments on this conversation:
@@ -140,8 +141,9 @@ in your config for `ctrl+g`.
 | `[[` / `]]` | annotate buffer | jump to the previous / next response |
 | `<leader>cm` | annotate buffer | prompt for a comment, insert `>> [n] ...` below the selection |
 | `dd` on a `>>` line | annotate buffer | drop that comment |
-| `<leader>pp` | annotate buffer | submit and close: from `ctrl+g` fills Claude's input, from the popup sends |
-| `:q` | annotate buffer | leave, discarding the comments (from `ctrl+g`, your draft is kept) |
+| `:w` / `:wq` | annotate buffer | save: put the comments in Claude's prompt, then close |
+| `<leader>pp` | annotate buffer | push: from the popup, save and send; from `ctrl+g`, the same as save |
+| `:q` | annotate buffer | leave without comments; `:q!` leaves and drops them (your draft is kept) |
 
 Editing a `>> [n]` line changes what gets sent — the quoted excerpt stays attached.
 
@@ -226,21 +228,24 @@ counted from the end, which the markdown filetype's `[[` and `]]` jump between. 
 wrap at spaces and hang under their list marker (`breakindent` with `list:-1`).
 Diagnostics are off: a linter would flag every paragraph's length.
 
-### Comments and submit
+### Comments, save and push
 
 A comment is a `>> [n] text` line below its excerpt, while the excerpt itself is kept in
 memory: once comment lines are interleaved, the block boundaries can't be recovered from the
 text. Rendered text never takes the comment shape, since prompts start with `> ` and
-Claude's text with two spaces. Submit reads each comment from its line, so editing it or
-`dd` counts.
+Claude's text with two spaces. The message is built from the comment lines when you save,
+so editing one or deleting it with `dd` counts.
 
-From `ctrl+g`, submit writes your draft, if any, then the comments into Claude's prompt
-file and quits. From the popup, it first checks that the pane's foreground program is
-still the Claude found at open: a suspended or exited Claude leaves a shell in front,
-which would run the excerpts as commands. It then pastes the message through a tmux
-buffer with `paste-buffer -p`, so the newlines don't submit it line by line, waits 200ms,
-presses Enter and closes the popup. On any failure the popup stays open with your
-comments.
+The plugin writes the buffer itself (`buftype=acwrite`), so `:w` saves. Once you have
+commented, the buffer is unsaved, and `:q` asks for `:q!` before dropping the comments.
+
+From `ctrl+g`, save writes your draft, if any, then the comments into Claude's prompt file
+and quits; push does the same, since nothing in Claude's editor can send. From the popup,
+save first checks that the pane's foreground program is still the Claude found at open:
+a suspended or exited Claude leaves a shell in front, which would run the excerpts as
+commands. It then pastes the message through a tmux buffer with `paste-buffer -p`, so the
+newlines don't send it line by line, and closes the popup; push also waits 200ms and
+presses Enter. On any failure the popup stays open with your comments.
 
 ## Known limits
 

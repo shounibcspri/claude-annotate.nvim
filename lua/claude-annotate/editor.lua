@@ -1,6 +1,7 @@
 -- Claude Code's ctrl+g: it opens nvim on its prompt file, and this opens the annotate
--- buffer instead. Submit writes the message into that file, which Claude loads into its
--- input once nvim exits; Enter sends it.
+-- buffer instead. Saving writes the message into that file, which Claude loads into its
+-- input once nvim exits; Enter there sends it. Nothing in Claude's editor can send, so
+-- <leader>pp saves too.
 
 local annotate = require 'claude-annotate.annotate'
 
@@ -18,14 +19,11 @@ local function claude_above()
 end
 
 -- A draft typed before ctrl+g stays in front of the notes.
-local function save(prompt, lines)
-  while lines[#lines] == '' do
-    table.remove(lines)
-  end
-  local draft = vim.fn.readfile(prompt)
-  if table.concat(draft):match '%S' then lines = vim.list_extend(vim.list_extend(draft, { '' }), lines) end
+---@return boolean saved
+local function save(prompt, draft, lines)
+  if table.concat(draft):match '%S' then lines = vim.list_extend(vim.list_extend(vim.deepcopy(draft), { '' }), lines) end
   vim.fn.writefile(lines, prompt)
-  vim.cmd 'qa!'
+  return true
 end
 
 ---@param file string the prompt file nvim was started on
@@ -36,7 +34,11 @@ function M.attach(file)
     local config = require('claude-annotate').config()
     local pid = claude_above()
     local transcript = pid and annotate.transcript_of(pid)
-    if transcript and not annotate.open(transcript, config, function(lines) save(file, lines) end) then
+    if not transcript then return end
+    -- read now, before anything writes the file
+    local draft = vim.fn.readfile(file)
+    local function to_prompt(lines) return save(file, draft, lines) end
+    if not annotate.open(transcript, config, { save = to_prompt, push = to_prompt }) then
       vim.notify 'claude-annotate: nothing to annotate yet, so this is the prompt as usual'
     end
   end
