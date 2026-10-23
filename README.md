@@ -42,6 +42,10 @@ right below what it is about:
 >> [2] the call isn't idempotent, so a retry could charge twice
 ```
 
+For a comment on the answer as a whole, press `<leader>cm` on the footer, the
+`## General comment` line at the bottom, where the cursor starts. You can add several;
+they come last in the message, after the comments on lines.
+
 When you save or push, Claude gets each comment with the exact text it is about:
 
 ```
@@ -141,6 +145,7 @@ in your config for `ctrl+g`.
 | `[[` / `]]` | annotate buffer | jump to the previous / next response |
 | `<leader>cm` | annotate buffer | prompt for a comment, insert `>> [n] ...` below the selection |
 | `dd` on a `>>` line | annotate buffer | drop that comment |
+| `<leader>cm` on the footer | annotate buffer | a comment on the whole answer, sent after the others |
 | `:w` / `:wq` | annotate buffer | save: put the comments in Claude's prompt, then close |
 | `<leader>pp` | annotate buffer | push: from the popup, save and send; from `ctrl+g`, the same as save |
 | `:q` | annotate buffer | leave without comments; `:q!` leaves and drops them (your draft is kept) |
@@ -154,6 +159,7 @@ require('claude-annotate').setup {
   last_n_response = 10,      -- how many of Claude's latest responses to show
   prefix = '>> ',            -- marks a comment line
   header = 'Comments on this conversation:', -- opens the message; '' leaves it out
+  footer = '## General comment', -- ends the buffer, for general comments; '' leaves it out
   keys = {
     comment = '<leader>cm',
     submit = '<leader>pp',
@@ -227,7 +233,11 @@ sent before Claude says anything share the reply that follows.
 It shows the last `last_n_response` responses, each with your prompt and under a heading
 counted from the end, which the markdown filetype's `[[` and `]]` jump between. Long lines
 wrap at spaces and hang under their list marker (`breakindent` with `list:-1`).
-Diagnostics are off: a linter would flag every paragraph's length.
+Diagnostics are off: a linter would flag every paragraph's length. The buffer ends with
+the footer (`footer`, `## General comment` by default), with the cursor on it: a comment
+on that line alone is about the whole answer, and goes after the others. The default
+can't clash with the conversation, since Claude's text is indented and your prompts
+start with `> `; a footer of your own should be just as distinct.
 
 ### Comments, save and push
 

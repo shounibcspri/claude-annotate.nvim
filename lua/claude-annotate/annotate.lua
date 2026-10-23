@@ -24,6 +24,14 @@ local handlers = {}
 -- diff -- and such a line then dropped out of the excerpt with nothing said.
 local comment_pattern
 
+-- A comment on the footer line alone, with nothing else selected: one on the answer as a
+-- whole. The default footer is a heading, which only this plugin writes at the start of a
+-- line: Claude's text is always indented.
+local function on_footer(excerpt)
+  local text = vim.tbl_filter(function(l) return l:match '%S' ~= nil end, excerpt)
+  return config.footer ~= '' and #text == 1 and text[1] == config.footer
+end
+
 ---@return string? n, string? text
 local function parse_comment(line) return line:match(comment_pattern) end
 
@@ -162,6 +170,8 @@ function M.open(transcript, cfg, opener)
 
   local lines = render(read_turns(transcript))
   if #lines == 0 then return false end
+  -- the cursor starts on the footer, so the comment key there adds a general comment
+  if config.footer ~= '' then vim.list_extend(lines, { '', config.footer }) end
 
   local buf = vim.api.nvim_create_buf(true, true)
   -- the session id, so which conversation you are looking at can be read at a glance
@@ -230,16 +240,23 @@ function M.comment(first, last)
     if not input or input == '' then return end
     local n = vim.tbl_count(excerpts[buf]) + 1
     excerpts[buf][n] = excerpt
-    vim.api.nvim_buf_set_lines(buf, last, last, false, { ('%s[%d] %s'):format(config.prefix, n, input) })
+    -- below the comments already under it too, so several on one line read in order
+    local row = last
+    while is_comment(vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or '') do
+      row = row + 1
+    end
+    vim.api.nvim_buf_set_lines(buf, row, row, false, { ('%s[%d] %s'):format(config.prefix, n, input) })
   end)
 end
 
--- Every note as one message, or nil when there is none. The buffer is read in order, so
--- deleting a comment line drops it, and editing one picks up the new text.
+-- Every note as one message, or nil when there is none: the notes on lines, then the
+-- general ones, which read as a conclusion. The buffer is read in order, so deleting a
+-- comment line drops it, and editing one picks up the new text.
 ---@return string[]? lines
 local function message(buf)
   -- split, since writefile would turn a newline inside one line into a NUL
   local out = config.header ~= '' and vim.split(config.header, '\n', { plain = true }) or {}
+  local general = {}
   local seen = {}
   for _, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
     local n, text = parse_comment(line)
@@ -251,13 +268,22 @@ local function message(buf)
       -- the buffer's own number, not a fresh counter: deleting a comment leaves a
       -- gap, and a gap is better than Claude calling [3] something you can still
       -- see labelled [4] on your screen
-      if #out > 0 then table.insert(out, '') end
-      table.insert(out, ('[%s] on:'):format(n))
-      for _, e in ipairs(excerpt) do
-        table.insert(out, '> ' .. e)
+      if on_footer(excerpt) then
+        -- shaped like the others, with nothing to quote
+        table.insert(general, { ('[%s] general comment:'):format(n), 'comment: ' .. text })
+      else
+        if #out > 0 then table.insert(out, '') end
+        table.insert(out, ('[%s] on:'):format(n))
+        for _, e in ipairs(excerpt) do
+          table.insert(out, '> ' .. e)
+        end
+        table.insert(out, 'comment: ' .. text)
       end
-      table.insert(out, 'comment: ' .. text)
     end
+  end
+  for _, g in ipairs(general) do
+    if #out > 0 then table.insert(out, '') end
+    vim.list_extend(out, g)
   end
   if next(seen) then return out end
 end

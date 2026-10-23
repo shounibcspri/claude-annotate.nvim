@@ -10,11 +10,13 @@ local M = {}
 ---@field last_n_response integer how many of Claude's latest responses to show, each with your prompt
 ---@field prefix string marks a comment line in the buffer
 ---@field header string opens the message Claude gets; '' leaves it out
+---@field footer string ends the buffer: comment on it to talk about the whole answer; '' leaves it out
 ---@field keys { comment: string, submit: string }
 local config = {
   last_n_response = 10,
   prefix = '>> ',
   header = 'Comments on this conversation:',
+  footer = '## General comment',
   keys = {
     comment = '<leader>cm',
     submit = '<leader>pp',
