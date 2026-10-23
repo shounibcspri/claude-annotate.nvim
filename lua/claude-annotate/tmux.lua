@@ -55,15 +55,23 @@ local function send(pane, pid, lines)
   vim.cmd 'qa!'
 end
 
+-- Nothing to review: close the popup rather than leave a bare nvim behind, whose
+-- unmapped <leader>pp would paste the last yank twice. The popup takes nvim's messages
+-- with it, so the reason goes to tmux's status line.
+local function leave(pane, why)
+  pcall(tmux, { 'display-message', '-d', '3000', '-t', pane, 'claude-annotate: ' .. why })
+  vim.cmd 'qa!'
+end
+
 ---@param pane string tmux pane id to review, e.g. '%35'
 ---@param config ClaudeAnnotateConfig
 function M.open(pane, config)
   local pid = claude_in_pane(pane)
   local transcript = pid and annotate.transcript_of(pid)
-  if not transcript then
-    return vim.notify('claude-annotate: no Claude session found in pane ' .. pane, vim.log.levels.WARN)
+  if not transcript then return leave(pane, 'no Claude session in this pane') end
+  if not annotate.open(transcript, config, function(lines) send(pane, pid, lines) end) then
+    leave(pane, 'nothing to review yet')
   end
-  annotate.open(transcript, config, function(lines) send(pane, pid, lines) end)
 end
 
 return M

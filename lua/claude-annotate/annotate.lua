@@ -140,15 +140,14 @@ end
 ---@param transcript string the session's .jsonl
 ---@param cfg ClaudeAnnotateConfig
 ---@param send fun(lines: string[]) delivers the message to Claude
+---@return boolean opened false when the session has nothing to review yet
 function M.open(transcript, cfg, send)
   config = cfg
   -- escaped, because a configured prefix may hold characters Lua patterns treat as syntax
   comment_pattern = '^' .. config.prefix:gsub('%p', '%%%0') .. '%[(%d+)%]%s*(.*)$'
 
   local lines = render(read_turns(transcript))
-  if #lines == 0 then
-    return vim.notify('claude-annotate: nothing to review yet in ' .. transcript, vim.log.levels.WARN)
-  end
+  if #lines == 0 then return false end
 
   local buf = vim.api.nvim_create_buf(true, true)
   -- the session id, so which conversation you are looking at can be read at a glance
@@ -193,6 +192,7 @@ function M.open(transcript, cfg, send)
   vim.wo[0].breakindent = true
   vim.wo[0].breakindentopt = 'list:-1'
   vim.api.nvim_win_set_cursor(0, { #lines, 0 })
+  return true
 end
 
 function M.comment_visual() M.comment(vim.fn.line "'<", vim.fn.line "'>") end

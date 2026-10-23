@@ -141,7 +141,8 @@ file by anything else, nvim just edits it.
 
 **The tmux popup.** `prefix + i` runs `tmux run-shell`, which expands `#{pane_id}` and opens
 nvim in a `display-popup` (a popup expands no formats itself and has no `TMUX_PANE`). nvim's
-`-c` calls `open(pane)`.
+`-c` calls `open(pane)`. In a pane with no Claude session, or nothing to review yet, the
+popup closes again and tmux's status line says why.
 
 ### Why the transcript, not the pane
 

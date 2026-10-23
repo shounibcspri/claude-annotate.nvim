@@ -36,7 +36,9 @@ function M.attach(file)
     local config = require('claude-annotate').config()
     local pid = claude_above()
     local transcript = pid and annotate.transcript_of(pid)
-    if transcript then annotate.open(transcript, config, function(lines) send(file, lines) end) end
+    if transcript and not annotate.open(transcript, config, function(lines) send(file, lines) end) then
+      vim.notify 'claude-annotate: nothing to review yet, so this is the prompt as usual'
+    end
   end
   if vim.v.vim_did_enter == 1 then
     edit()
