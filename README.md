@@ -170,6 +170,25 @@ require('claude-annotate').setup {
 Set a key to `''` to skip that mapping. All mappings are buffer-local to the annotate
 buffer. The tmux popup needs no option: installing its binding is what turns it on.
 
+## Rendering
+
+The plugin draws nothing itself: the buffer is plain markdown, so a markdown renderer can
+show it the way Claude Code does, bold without its `**` and tables with borders.
+[render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim) works
+as is. Its default heading icons number the level, which reads oddly next to
+`Response -2`, so this leaves them out:
+
+```lua
+require('render-markdown').setup {
+  heading = { icons = { '' }, sign = false },
+}
+```
+
+Keep the default `position`: `inline` and `right` cut the first letters of Claude's
+headings, which are indented. Visual mode and the cursor line show the raw markdown, which
+is what a comment quotes. A comment inside a table ends the table there, and comment
+numbers show without their brackets.
+
 ## How it works
 
 Under `lua/claude-annotate/`, `init.lua` holds the config and routes. `editor.lua` handles

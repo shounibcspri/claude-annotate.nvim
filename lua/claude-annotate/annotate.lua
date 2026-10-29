@@ -182,7 +182,6 @@ function M.open(transcript, cfg, opener)
   vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].modified = false
   vim.api.nvim_create_autocmd('BufWriteCmd', { group = group, buffer = buf, callback = function() M.save() end })
-  vim.bo[buf].filetype = 'markdown'
   -- a conversation, not a document: markdownlint's line length rule alone flags every paragraph
   vim.diagnostic.enable(false, { bufnr = buf })
   excerpts[buf] = {}
@@ -214,6 +213,8 @@ function M.open(transcript, cfg, opener)
   map('n', config.keys.submit, M.push, 'Claude: [p]ush comments')
 
   vim.api.nvim_win_set_buf(0, buf)
+  -- once shown, so FileType handlers act on this window, not the stand-in nvim lends a hidden buffer
+  vim.bo[buf].filetype = 'markdown'
   -- a paragraph arrives as one line: wrap it at spaces, under its list marker if it has one
   vim.wo[0].linebreak = true
   vim.wo[0].breakindent = true
