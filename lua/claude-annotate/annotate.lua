@@ -148,9 +148,10 @@ local function render(turns)
     end
   end
   for i = math.max(1, #turns - config.last_n_response + 1), #turns do
-    -- counted from the end, the way you refer to them; markdown's [[ and ]] jump between them
+    -- counted from the end, the way you refer to them; level 1, above Claude's own headings,
+    -- which nest under them; markdown's [[ and ]] jump between them
     local back = #turns - i + 1
-    add(back == 1 and 'Last response' or ('Response -%d'):format(back), '## ')
+    add(back == 1 and 'Last response' or ('Response -%d'):format(back), '# ')
     add(turns[i].prompt, '> ')
     for _, text in ipairs(turns[i].reply) do
       add(text, '  ')
@@ -219,11 +220,31 @@ function M.open(transcript, cfg, opener)
   vim.wo[0].linebreak = true
   vim.wo[0].breakindent = true
   vim.wo[0].breakindentopt = 'list:-1'
+  -- comments stand apart from quotes, tables and code, rendered or not
+  vim.api.nvim_set_hl(0, 'ClaudeAnnotateComment', { link = 'DiagnosticInfo', default = true })
+  vim.fn.matchadd('ClaudeAnnotateComment', [[\V\_^]] .. vim.fn.escape(config.prefix, [[\]]) .. [[[\d\+]\.\*]])
   vim.api.nvim_win_set_cursor(0, { #lines, 0 })
   return true
 end
 
 function M.comment_visual() M.comment(vim.fn.line "'<", vim.fn.line "'>") end
+
+-- A comment line ends a markdown table, so one on a row goes below the table instead.
+---@return integer lnum the table's last line, or lnum itself outside a table
+local function table_end(buf, lnum)
+  local ok, parser = pcall(vim.treesitter.get_parser, buf, 'markdown')
+  if not ok or not parser then return lnum end
+  parser:parse()
+  local indent = #vim.api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1]:match '^%s*'
+  local node = vim.treesitter.get_node { bufnr = buf, pos = { lnum - 1, indent } }
+  while node and node:type() ~= 'pipe_table' do
+    node = node:parent()
+  end
+  if not node then return lnum end
+  -- the range ends where the next line starts, unless the table ends the buffer
+  local _, _, end_row, end_col = node:range()
+  return end_col == 0 and end_row or end_row + 1
+end
 
 function M.comment(first, last)
   local buf = vim.api.nvim_get_current_buf()
@@ -242,7 +263,7 @@ function M.comment(first, last)
     local n = vim.tbl_count(excerpts[buf]) + 1
     excerpts[buf][n] = excerpt
     -- below the comments already under it too, so several on one line read in order
-    local row = last
+    local row = table_end(buf, last)
     while is_comment(vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or '') do
       row = row + 1
     end

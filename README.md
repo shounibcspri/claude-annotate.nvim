@@ -23,7 +23,7 @@ Claude answers a prompt. In nvim, each response sits under a heading, after the 
 that asked for it, with one paragraph or list item per line:
 
 ```markdown
-## Last response
+# Last response
 
 > make the payment call more robust
 
@@ -43,7 +43,7 @@ right below what it is about:
 ```
 
 For a comment on the answer as a whole, press `<leader>cm` on the footer, the
-`## General comment` line at the bottom, where the cursor starts. You can add several;
+`# General comment` line at the bottom, where the cursor starts. You can add several;
 they come last in the message, after the comments on lines.
 
 When you save or push, Claude gets each comment with the exact text it is about:
@@ -143,7 +143,7 @@ in your config for `ctrl+g`.
 | `prefix + i` | a Claude pane in tmux, popup installed | open the annotate buffer in a popup over it |
 | `V` + motion | annotate buffer | select a block (a paragraph is one line; `Vip` takes a list) |
 | `[[` / `]]` | annotate buffer | jump to the previous / next response |
-| `<leader>cm` | annotate buffer | prompt for a comment, insert `>> [n] ...` below the selection |
+| `<leader>cm` | annotate buffer | prompt for a comment, insert `>> [n] ...` below the selection (below the table, for table rows) |
 | `dd` on a `>>` line | annotate buffer | drop that comment |
 | `<leader>cm` on the footer | annotate buffer | a comment on the whole answer, sent after the others |
 | `:w` / `:wq` | annotate buffer | save: put the comments in Claude's prompt, then close |
@@ -159,7 +159,7 @@ require('claude-annotate').setup {
   last_n_response = 10,      -- how many of Claude's latest responses to show
   prefix = '>> ',            -- marks a comment line
   header = 'Comments on this conversation:', -- opens the message; '' leaves it out
-  footer = '## General comment', -- ends the buffer, for general comments; '' leaves it out
+  footer = '# General comment', -- ends the buffer, for general comments; '' leaves it out
   keys = {
     comment = '<leader>cm',
     submit = '<leader>pp',
@@ -169,6 +169,13 @@ require('claude-annotate').setup {
 
 Set a key to `''` to skip that mapping. All mappings are buffer-local to the annotate
 buffer. The tmux popup needs no option: installing its binding is what turns it on.
+
+Comment lines are drawn with the `ClaudeAnnotateComment` highlight, linked to
+`DiagnosticInfo` unless you set it yourself:
+
+```lua
+vim.api.nvim_set_hl(0, 'ClaudeAnnotateComment', { link = 'Todo' })
+```
 
 ## Rendering
 
@@ -186,8 +193,8 @@ require('render-markdown').setup {
 
 Keep the default `position`: `inline` and `right` cut the first letters of Claude's
 headings, which are indented. Visual mode and the cursor line show the raw markdown, which
-is what a comment quotes. A comment inside a table ends the table there, and comment
-numbers show without their brackets.
+is what a comment quotes. Comment numbers show without their brackets: markdown reads `[1]`
+as a link.
 
 ## How it works
 
@@ -242,7 +249,7 @@ sent before Claude says anything share the reply that follows.
 ### The buffer
 
 ```markdown
-## Response -2
+# Response -2
 
 > your prompt
 
@@ -250,10 +257,12 @@ sent before Claude says anything share the reply that follows.
 ```
 
 It shows the last `last_n_response` responses, each with your prompt and under a heading
-counted from the end, which the markdown filetype's `[[` and `]]` jump between. Long lines
-wrap at spaces and hang under their list marker (`breakindent` with `list:-1`).
-Diagnostics are off: a linter would flag every paragraph's length. The buffer ends with
-the footer (`footer`, `## General comment` by default), with the cursor on it: a comment
+counted from the end, which the markdown filetype's `[[` and `]]` jump between. The heading
+is level 1, so Claude's own headings, all `##` and below in practice, nest under it, and a
+renderer draws it apart from them. Long lines wrap at spaces and hang under their list
+marker (`breakindent` with `list:-1`). Diagnostics are off: a linter would flag every
+paragraph's length. The buffer ends with
+the footer (`footer`, `# General comment` by default), with the cursor on it: a comment
 on that line alone is about the whole answer, and goes after the others. The default
 can't clash with the conversation, since Claude's text is indented and your prompts
 start with `> `; a footer of your own should be just as distinct.
@@ -262,7 +271,9 @@ start with `> `; a footer of your own should be just as distinct.
 
 A comment is a `>> [n] text` line below its excerpt, while the excerpt itself is kept in
 memory: once comment lines are interleaved, the block boundaries can't be recovered from the
-text. Rendered text never takes the comment shape, since prompts start with `> ` and
+text. A comment on a table row goes below the whole table instead, since a line in between
+would end the table there. Comment lines get their own highlight, so they stand apart from
+quotes, tables and code with or without a renderer. Rendered text never takes the comment shape, since prompts start with `> ` and
 Claude's text with two spaces. The message is built from the comment lines when you save,
 so editing one or deleting it with `dd` counts.
 
