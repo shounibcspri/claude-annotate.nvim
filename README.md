@@ -51,13 +51,16 @@ When you save or push, Claude gets each comment with the exact text it is about:
 ```
 Comments on this conversation:
 
-[1] on:
+[1] comment on:
 >   - the input is now validated before it is hashed
-comment: no need, it's an internal call and the boundary already validates
+no need, it's an internal call and the boundary already validates
 
-[2] on:
+[2] comment on:
 >   - the call to the payment service is retried, with exponential backoff
-comment: the call isn't idempotent, so a retry could charge twice
+the call isn't idempotent, so a retry could charge twice
+
+[3] general comment:
+the rest looks good
 ```
 
 ## Requires

@@ -292,14 +292,14 @@ local function message(buf)
       -- see labelled [4] on your screen
       if on_footer(excerpt) then
         -- shaped like the others, with nothing to quote
-        table.insert(general, { ('[%s] general comment:'):format(n), 'comment: ' .. text })
+        table.insert(general, { ('[%s] general comment:'):format(n), text })
       else
         if #out > 0 then table.insert(out, '') end
-        table.insert(out, ('[%s] on:'):format(n))
+        table.insert(out, ('[%s] comment on:'):format(n))
         for _, e in ipairs(excerpt) do
           table.insert(out, '> ' .. e)
         end
-        table.insert(out, 'comment: ' .. text)
+        table.insert(out, text)
       end
     end
   end
