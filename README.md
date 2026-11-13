@@ -51,20 +51,22 @@ When you save or push, Claude gets each comment with the exact text it is about:
 ```
 Comments on this conversation:
 
-[1] comment on:
+comment on:
 >   - the input is now validated before it is hashed
 no need, it's an internal call and the boundary already validates
 
-[2] [3] comment on:
+comment on:
 >   - the call to the payment service is retried, with exponential backoff
-[2] the call isn't idempotent, so a retry could charge twice
-[3] and backoff delays the error the user is waiting for
+- the call isn't idempotent, so a retry could charge twice
+- and backoff delays the error the user is waiting for
 
-[4] general comment:
+general comment:
 the rest looks good
 ```
 
-Several comments on the same excerpt share one quote, numbered below it.
+Several comments on the same excerpt share one quote, a bullet each below it. The
+numbers stay in the buffer and are left out of the message, so Claude answers a comment
+by what it says.
 
 ## Requires
 

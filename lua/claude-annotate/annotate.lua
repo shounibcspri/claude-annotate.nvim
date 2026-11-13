@@ -279,7 +279,7 @@ local function message(buf)
   -- split, since writefile would turn a newline inside one line into a NUL
   local out = config.header ~= '' and vim.split(config.header, '\n', { plain = true }) or {}
   -- comments on one excerpt stack under it, and quoting it once per comment repeats it:
-  -- so they share one quote, { excerpt, notes = { { n, text } } }
+  -- so they share one quote, { excerpt, notes = { text } }
   local groups, general = {}, {}
   local seen, last_row = {}, nil
   for row, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
@@ -289,19 +289,18 @@ local function message(buf)
     -- twice reads to Claude as two separate objections
     if excerpt and not seen[n] then
       seen[n] = true
-      -- the buffer's own number, not a fresh counter: deleting a comment leaves a
-      -- gap, and a gap is better than Claude calling [3] something you can still
-      -- see labelled [4] on your screen
+      -- the number stays in the buffer, where it links a line to its excerpt; the message
+      -- leaves it out, so Claude answers a comment by what it says, not by its number
       if on_footer(excerpt) then
         -- shaped like the others, with nothing to quote
-        table.insert(general, { ('[%s] general comment:'):format(n), text })
+        table.insert(general, { 'general comment:', text })
       else
         -- only right under the previous one: the same text elsewhere is another place
         local group = groups[#groups]
         if group and last_row == row - 1 and vim.deep_equal(group.excerpt, excerpt) then
-          table.insert(group.notes, { n, text })
+          table.insert(group.notes, text)
         else
-          table.insert(groups, { excerpt = excerpt, notes = { { n, text } } })
+          table.insert(groups, { excerpt = excerpt, notes = { text } })
         end
         last_row = row
       end
@@ -309,14 +308,13 @@ local function message(buf)
   end
   for _, group in ipairs(groups) do
     if #out > 0 then table.insert(out, '') end
-    local ns = vim.tbl_map(function(note) return ('[%s]'):format(note[1]) end, group.notes)
-    table.insert(out, table.concat(ns, ' ') .. ' comment on:')
+    table.insert(out, 'comment on:')
     for _, e in ipairs(group.excerpt) do
       table.insert(out, '> ' .. e)
     end
     for _, note in ipairs(group.notes) do
-      -- numbered when several share the quote, so Claude can tell which it answers
-      table.insert(out, #group.notes > 1 and ('[%s] %s'):format(note[1], note[2]) or note[2])
+      -- a bullet each when several share the quote, so they read as separate points
+      table.insert(out, #group.notes > 1 and '- ' .. note or note)
     end
   end
   for _, g in ipairs(general) do
