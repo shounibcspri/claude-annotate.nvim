@@ -55,13 +55,16 @@ Comments on this conversation:
 >   - the input is now validated before it is hashed
 no need, it's an internal call and the boundary already validates
 
-[2] comment on:
+[2] [3] comment on:
 >   - the call to the payment service is retried, with exponential backoff
-the call isn't idempotent, so a retry could charge twice
+[2] the call isn't idempotent, so a retry could charge twice
+[3] and backoff delays the error the user is waiting for
 
-[3] general comment:
+[4] general comment:
 the rest looks good
 ```
+
+Several comments on the same excerpt share one quote, numbered below it.
 
 ## Requires
 

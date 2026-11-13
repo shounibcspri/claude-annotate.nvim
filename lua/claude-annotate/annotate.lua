@@ -278,9 +278,11 @@ end
 local function message(buf)
   -- split, since writefile would turn a newline inside one line into a NUL
   local out = config.header ~= '' and vim.split(config.header, '\n', { plain = true }) or {}
-  local general = {}
-  local seen = {}
-  for _, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+  -- comments on one excerpt stack under it, and quoting it once per comment repeats it:
+  -- so they share one quote, { excerpt, notes = { { n, text } } }
+  local groups, general = {}, {}
+  local seen, last_row = {}, nil
+  for row, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
     local n, text = parse_comment(line)
     local excerpt = n and excerpts[buf][tonumber(n)]
     -- a yanked-and-put comment line carries its number along, and one note quoted
@@ -294,13 +296,27 @@ local function message(buf)
         -- shaped like the others, with nothing to quote
         table.insert(general, { ('[%s] general comment:'):format(n), text })
       else
-        if #out > 0 then table.insert(out, '') end
-        table.insert(out, ('[%s] comment on:'):format(n))
-        for _, e in ipairs(excerpt) do
-          table.insert(out, '> ' .. e)
+        -- only right under the previous one: the same text elsewhere is another place
+        local group = groups[#groups]
+        if group and last_row == row - 1 and vim.deep_equal(group.excerpt, excerpt) then
+          table.insert(group.notes, { n, text })
+        else
+          table.insert(groups, { excerpt = excerpt, notes = { { n, text } } })
         end
-        table.insert(out, text)
+        last_row = row
       end
+    end
+  end
+  for _, group in ipairs(groups) do
+    if #out > 0 then table.insert(out, '') end
+    local ns = vim.tbl_map(function(note) return ('[%s]'):format(note[1]) end, group.notes)
+    table.insert(out, table.concat(ns, ' ') .. ' comment on:')
+    for _, e in ipairs(group.excerpt) do
+      table.insert(out, '> ' .. e)
+    end
+    for _, note in ipairs(group.notes) do
+      -- numbered when several share the quote, so Claude can tell which it answers
+      table.insert(out, #group.notes > 1 and ('[%s] %s'):format(note[1], note[2]) or note[2])
     end
   end
   for _, g in ipairs(general) do
